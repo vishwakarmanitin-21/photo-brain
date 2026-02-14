@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# PhotoBrain runtime data
+.photobrain/
+
+# OS
+Thumbs.db
+.DS_Store
