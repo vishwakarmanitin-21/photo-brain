@@ -8,11 +8,11 @@ PhotoBrain Desktop is a local-first Windows GUI application for cleaning and org
 
 - **Language:** Python 3.10+
 - **UI:** PySide6 (Qt for Python)
-- **Image processing:** opencv-python (sharpness via Laplacian), Pillow (thumbnails + EXIF)
+- **Image processing:** opencv-python (sharpness via Laplacian), Pillow (thumbnails + EXIF), scipy (head pose estimation)
 - **Similarity:** imagehash (pHash + Hamming distance)
 - **Face detection:** mediapipe (Tasks API — `mp.tasks.vision.FaceDetector` + `FaceLandmarker`)
 - **File deletion:** send2trash (cross-platform Recycle Bin)
-- **Persistence:** SQLite (stdlib) with WAL mode, schema version 6
+- **Persistence:** SQLite (stdlib) with WAL mode, schema version 7
 - **Packaging:** pip + requirements.txt + venv
 
 ## Architecture
@@ -31,7 +31,7 @@ app/
     faces.py                  # Face detection (multi-scale) + expression analysis via mediapipe Tasks API
     events.py                 # EXIF date/time extraction + time-proximity event grouping
     thumbnails.py             # 200x200 JPEG cache in .photobrain/thumbs/
-    session_store.py          # SQLite CRUD with WAL, batch inserts, schema migrations (v1→v6)
+    session_store.py          # SQLite CRUD with WAL, batch inserts, schema migrations (v1→v7)
     file_ops.py               # Safe file moves, Recycle Bin delete, collision handling, CSV/JSON logs, undo
   ui/                         # PySide6 widgets — no processing logic
     main_window.py            # QStackedWidget (Setup→Scan→Review), owns workers + store
@@ -116,8 +116,10 @@ venv\Scripts\python run.py
 
 - **mediapipe API:** Uses `mp.tasks.vision.FaceDetector` (Tasks API), NOT the deprecated `mp.solutions` API. Multi-scale detection using `blaze_face_short_range.tflite`: runs on original image first (close-up faces), then on progressively downscaled versions (50%, 25%) to catch distant/small faces. Models auto-download to temp dir on first use. Expression analysis uses `FaceLandmarker` (`face_landmarker.task`) for blendshape-based eyes-open and smile scoring (works on close-up faces; distant faces get detection but not expressions).
 - **QDialog.Accepted:** Always use `QDialog.Accepted` (class-level), never `dialog.Accepted` (instance-level) — PySide6 doesn't expose it on instances.
-- **Quality score formula:** `0.48 * log(sharpness+1) + 0.14 * (brightness/255) + 0.10 * min(face_count, 3) + 0.13 * eyes_open_score + 0.10 * smile_score + 0.05 * subject_isolation`
+- **Quality score formula:** `0.45 * log(sharpness+1) + 0.13 * (brightness/255) + 0.10 * min(face_count, 3) + 0.12 * eyes_open_score + 0.09 * smile_score + 0.05 * subject_isolation + 0.04 * expression_naturalness + 0.02 * head_pose_frontal`
 - **Subject isolation:** Measures composition cleanliness (1.0 = clean portrait/uniform group, < 1.0 = background bystanders). Computed via multi-scale face detection + IoU merge. Faces < 25% of the largest face area are classified as background noise.
+- **Expression naturalness:** Penalizes awkward/unflattering expressions (squinting, frowning, mid-speech, jaw tension) using mediapipe blendshapes. 1.0 = natural/relaxed, lower = awkward.
+- **Head pose frontal:** Rewards frontal, flattering head angles from mediapipe transformation matrix. 1.0 = frontal (yaw≈0, pitch≈0, roll≈0), lower = extreme angles (profile, looking up/down).
 
 ## Conventions
 

@@ -41,14 +41,18 @@ def compute_quality_score(
     eyes_open_score: float = 0.0,
     smile_score: float = 0.0,
     subject_isolation: float = 0.0,
+    expression_naturalness: float = 0.0,
+    head_pose_frontal: float = 0.0,
 ) -> float:
     return (
-        0.48 * math.log(sharpness + 1)
-        + 0.14 * (brightness / 255.0)
+        0.45 * math.log(sharpness + 1)
+        + 0.13 * (brightness / 255.0)
         + 0.10 * min(face_count, 3)
-        + 0.13 * eyes_open_score
-        + 0.10 * smile_score
+        + 0.12 * eyes_open_score
+        + 0.09 * smile_score
         + 0.05 * subject_isolation
+        + 0.04 * expression_naturalness
+        + 0.02 * head_pose_frontal
     )
 
 
@@ -69,6 +73,7 @@ def rescore_with_faces(photo: "Photo") -> float:
     return compute_quality_score(
         photo.sharpness, photo.brightness, photo.face_count,
         photo.eyes_open_score, photo.smile_score, photo.subject_isolation,
+        photo.expression_naturalness, photo.head_pose_frontal,
     )
 
 

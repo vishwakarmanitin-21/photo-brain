@@ -50,17 +50,21 @@ class FileOperator:
                 continue  # Skip undecided
 
             try:
-                if not os.path.isfile(photo.filepath):
-                    log.warning("Source file missing: %s", photo.filepath)
+                # Normalize path separators — send2trash uses \\?\ prefix
+                # on Windows which requires pure backslashes
+                filepath = os.path.normpath(photo.filepath)
+
+                if not os.path.isfile(filepath):
+                    log.warning("Source file missing: %s", filepath)
                     errors += 1
                     continue
 
                 if photo.verdict == Verdict.DELETE:
                     # Permanent delete — send to Recycle Bin
-                    send2trash(photo.filepath)
+                    send2trash(filepath)
                     entries.append(ApplyLogEntry(
                         photo_id=photo.id,
-                        original_path=photo.filepath,
+                        original_path=filepath,
                         destination_path="[RECYCLE BIN]",
                         verdict=photo.verdict.value,
                         dup_type=photo.dup_type.value,
@@ -75,11 +79,11 @@ class FileOperator:
                     dest_path = os.path.join(dest_dir, photo.filename)
                     dest_path = resolve_collision(dest_path)
 
-                    shutil.move(photo.filepath, dest_path)
+                    shutil.move(filepath, dest_path)
 
                     entries.append(ApplyLogEntry(
                         photo_id=photo.id,
-                        original_path=photo.filepath,
+                        original_path=filepath,
                         destination_path=dest_path,
                         verdict=photo.verdict.value,
                         dup_type=photo.dup_type.value,

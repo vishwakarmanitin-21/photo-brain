@@ -5,9 +5,9 @@ A local-first Windows desktop application for cleaning and organizing large batc
 ## Features
 
 - **Duplicate Detection** — finds exact duplicates (SHA256) and near-duplicates (perceptual hash)
-- **Quality Scoring** — ranks photos by sharpness, brightness, face presence, expressions, and composition
+- **Quality Scoring** — ranks photos by sharpness, brightness, face presence, expressions, composition, and head pose
 - **Face Detection** — multi-scale face detection catches both close-up and distant faces
-- **Expression Analysis** — scores eyes-open and smile via Face Landmarker blendshapes
+- **Expression Analysis** — scores eyes-open, smile, expression naturalness, and head pose via Face Landmarker blendshapes and transformation matrix
 - **Subject Isolation** — penalizes photos with random background bystanders (group photos are not penalized)
 - **Event Grouping** — groups photos into time-based events using EXIF date/time
 - **Smart Suggestions** — automatically suggests which photos to keep and which to archive
@@ -100,7 +100,7 @@ Browse clusters of similar photos in a visual grid:
 - **Red border** = DELETE
 - **Gray border** = undecided (REVIEW)
 
-Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, and isolation %. Filter by face distance, events, or group shots.
+Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, isolation %, expression naturalness %, and head pose frontal %. Filter by face distance, events, or group shots.
 
 ### 4. Apply
 
@@ -147,30 +147,34 @@ Accessible from the home screen:
 ## Quality Score Formula
 
 ```
-score = 0.48 * log(sharpness + 1)
-      + 0.14 * (brightness / 255)
+score = 0.45 * log(sharpness + 1)
+      + 0.13 * (brightness / 255)
       + 0.10 * min(face_count, 3)
-      + 0.13 * eyes_open_score
-      + 0.10 * smile_score
+      + 0.12 * eyes_open_score
+      + 0.09 * smile_score
       + 0.05 * subject_isolation
+      + 0.04 * expression_naturalness
+      + 0.02 * head_pose_frontal
 ```
 
 | Component | Weight | Description |
 |-----------|--------|-------------|
-| **Sharpness** | 48% | Variance of the Laplacian (measures edge contrast / focus). Log-compressed. |
-| **Brightness** | 14% | Mean pixel luminance normalized to [0, 1]. |
+| **Sharpness** | 45% | Variance of the Laplacian (measures edge contrast / focus). Log-compressed. |
+| **Brightness** | 13% | Mean pixel luminance normalized to [0, 1]. |
 | **Face count** | 10% | Number of detected faces, capped at 3. |
-| **Eyes open** | 13% | Average eyes-open score across faces (0 = closed, 1 = open). |
-| **Smile** | 10% | Average smile score across faces (0 = neutral, 1 = smiling). |
+| **Eyes open** | 12% | Average eyes-open score across faces (0 = closed, 1 = open). |
+| **Smile** | 9% | Average smile score across faces (0 = neutral, 1 = smiling). |
 | **Subject isolation** | 5% | Composition cleanliness — 1.0 for clean portraits and uniform groups, < 1.0 when small background bystanders are detected. |
+| **Expression naturalness** | 4% | Penalizes awkward/unflattering expressions (squinting, frowning, mid-speech, jaw tension). 1.0 = natural/relaxed, lower = awkward. |
+| **Head pose frontal** | 2% | Rewards frontal, flattering head angles. 1.0 = frontal (yaw≈0, pitch≈0, roll≈0), lower = extreme angles (profile, looking up/down). |
 
-Photos without faces compete on sharpness and brightness only (face/expression/isolation terms are 0).
+Photos without faces compete on sharpness and brightness only (face/expression/isolation/naturalness/pose terms are 0).
 
 ## Project Structure
 
 ```
 photo-brain/
-  requirements.txt              # PySide6, opencv-python, Pillow, imagehash, mediapipe, send2trash
+  requirements.txt              # PySide6, opencv-python, Pillow, imagehash, mediapipe, send2trash, scipy
   run.py                        # Entry point
   assets/
     photobrain.ico              # Application icon
@@ -186,7 +190,7 @@ photo-brain/
       faces.py                  # Multi-scale face detection + expression analysis (mediapipe)
       events.py                 # EXIF date/time extraction + event grouping
       thumbnails.py             # Thumbnail cache management
-      session_store.py          # SQLite persistence layer (schema v6)
+      session_store.py          # SQLite persistence layer (schema v7)
       file_ops.py               # File move operations + undo
     ui/
       main_window.py            # Main window with screen navigation

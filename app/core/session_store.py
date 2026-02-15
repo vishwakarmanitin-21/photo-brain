@@ -12,7 +12,7 @@ from app.core.models import (
 
 log = logging.getLogger("photobrain.session_store")
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS session (
@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS photos (
     eyes_open_score REAL DEFAULT 0.0,
     smile_score REAL DEFAULT 0.0,
     subject_isolation REAL DEFAULT 0.0,
+    expression_naturalness REAL DEFAULT 0.0,
+    head_pose_frontal REAL DEFAULT 0.0,
     exif_datetime TEXT,
     event_id TEXT,
     FOREIGN KEY (session_id) REFERENCES session(id)
@@ -149,6 +151,12 @@ MIGRATION_V5_TO_V6 = [
     "ALTER TABLE photos ADD COLUMN subject_isolation REAL DEFAULT 0.0",
 ]
 
+# Migration from v6 to v7: add expression naturalness and head pose
+MIGRATION_V6_TO_V7 = [
+    "ALTER TABLE photos ADD COLUMN expression_naturalness REAL DEFAULT 0.0",
+    "ALTER TABLE photos ADD COLUMN head_pose_frontal REAL DEFAULT 0.0",
+]
+
 
 class SessionStore:
     def __init__(self, db_path: str):
@@ -222,6 +230,17 @@ class SessionStore:
         if version == 5:
             log.info("Migrating database from v5 to v6 (add subject isolation)")
             for sql in MIGRATION_V5_TO_V6:
+                try:
+                    self._conn.execute(sql)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        log.warning("Migration statement failed: %s", e)
+            self._conn.commit()
+            version = 6
+
+        if version == 6:
+            log.info("Migrating database from v6 to v7 (add expression naturalness, head pose)")
+            for sql in MIGRATION_V6_TO_V7:
                 try:
                     self._conn.execute(sql)
                 except sqlite3.OperationalError as e:
@@ -317,8 +336,9 @@ class SessionStore:
                     cluster_id, verdict, dup_type, user_override, thumb_path,
                     scan_order, face_count, face_area_ratio, face_distance,
                     eyes_open_score, smile_score, subject_isolation,
+                    expression_naturalness, head_pose_frontal,
                     exif_datetime, event_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
                     (p.id, session_id, p.filepath, p.filename, p.file_size,
                      p.sha256, p.phash, p.sharpness, p.brightness, p.quality_score,
@@ -326,6 +346,7 @@ class SessionStore:
                      int(p.user_override), p.thumb_path, p.scan_order,
                      p.face_count, p.face_area_ratio, p.face_distance.value,
                      p.eyes_open_score, p.smile_score, p.subject_isolation,
+                     p.expression_naturalness, p.head_pose_frontal,
                      p.exif_datetime, p.event_id)
                     for p in photos
                 ],
@@ -361,7 +382,8 @@ class SessionStore:
                    quality_score=?, cluster_id=?, verdict=?, dup_type=?,
                    user_override=?, thumb_path=?, face_count=?, face_area_ratio=?,
                    face_distance=?, eyes_open_score=?, smile_score=?,
-                   subject_isolation=?, exif_datetime=?, event_id=?
+                   subject_isolation=?, expression_naturalness=?, head_pose_frontal=?,
+                   exif_datetime=?, event_id=?
                    WHERE id=?""",
                 [
                     (p.sha256, p.phash, p.sharpness, p.brightness,
@@ -369,6 +391,7 @@ class SessionStore:
                      p.dup_type.value, int(p.user_override), p.thumb_path,
                      p.face_count, p.face_area_ratio, p.face_distance.value,
                      p.eyes_open_score, p.smile_score, p.subject_isolation,
+                     p.expression_naturalness, p.head_pose_frontal,
                      p.exif_datetime, p.event_id, p.id)
                     for p in photos
                 ],
@@ -528,6 +551,8 @@ class SessionStore:
             eyes_open_score=row["eyes_open_score"] or 0.0,
             smile_score=row["smile_score"] or 0.0,
             subject_isolation=row["subject_isolation"] or 0.0,
+            expression_naturalness=row["expression_naturalness"] or 0.0,
+            head_pose_frontal=row["head_pose_frontal"] or 0.0,
             exif_datetime=row["exif_datetime"],
             event_id=row["event_id"],
         )

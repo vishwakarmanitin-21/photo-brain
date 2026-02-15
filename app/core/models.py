@@ -54,6 +54,8 @@ class Photo:
     eyes_open_score: float = 0.0
     smile_score: float = 0.0
     subject_isolation: float = 0.0
+    expression_naturalness: float = 0.0
+    head_pose_frontal: float = 0.0
     exif_datetime: Optional[str] = None
     event_id: Optional[str] = None
 

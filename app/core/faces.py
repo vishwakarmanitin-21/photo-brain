@@ -6,6 +6,7 @@ import urllib.request
 
 import cv2
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 log = logging.getLogger("photobrain.faces")
 
@@ -150,6 +151,75 @@ def _compute_isolation(face_areas: list[float]) -> float:
     return round(primary_area / total_area, 4) if total_area > 0 else 1.0
 
 
+def _compute_expression_naturalness(blendshapes) -> float:
+    """Compute expression naturalness score (0.0-1.0) from 52 blendshapes.
+
+    Penalizes awkward/unflattering expressions:
+    - eyeSquint: squinting into sun
+    - mouthFrown: sad/angry expression
+    - jawOpen: mid-speech, yawning
+    - mouthFunnel: "O" mouth (surprised)
+    - browDown: furrowed brow (concerned)
+
+    Returns 1.0 for natural, relaxed expressions; lower for awkward ones.
+    """
+    try:
+        # Extract relevant blendshapes (by index)
+        eye_squint_left = blendshapes[19].score if len(blendshapes) > 19 else 0.0
+        eye_squint_right = blendshapes[20].score if len(blendshapes) > 20 else 0.0
+        mouth_frown_left = blendshapes[30].score if len(blendshapes) > 30 else 0.0
+        mouth_frown_right = blendshapes[31].score if len(blendshapes) > 31 else 0.0
+        jaw_open = blendshapes[25].score if len(blendshapes) > 25 else 0.0
+        mouth_funnel = blendshapes[32].score if len(blendshapes) > 32 else 0.0
+        brow_down_left = blendshapes[1].score if len(blendshapes) > 1 else 0.0
+        brow_down_right = blendshapes[2].score if len(blendshapes) > 2 else 0.0
+
+        # Apply penalty formula
+        naturalness = 1.0
+        naturalness -= 0.08 * (eye_squint_left + eye_squint_right) / 2.0
+        naturalness -= 0.10 * (mouth_frown_left + mouth_frown_right) / 2.0
+        naturalness -= 0.05 * jaw_open
+        naturalness -= 0.04 * mouth_funnel
+        naturalness -= 0.03 * max(brow_down_left, brow_down_right)
+
+        # Clamp to [0.0, 1.0]
+        return max(0.0, min(1.0, naturalness))
+
+    except (IndexError, AttributeError) as e:
+        log.warning("Failed to compute expression naturalness: %s", e)
+        return 0.0
+
+
+def _compute_head_pose_frontal(matrix) -> float:
+    """Compute head pose frontal score (0.0-1.0) from transformation matrix.
+
+    Penalizes extreme angles:
+    - yaw: left/right turn (0° ideal, -90/+90 bad)
+    - pitch: up/down tilt (0° ideal, -90/+90 bad)
+    - roll: head tilt (0° ideal, ±180 bad)
+
+    Returns 1.0 for frontal faces; lower for profile/extreme angles.
+    """
+    try:
+        # Extract 3x3 rotation matrix from 4x4 transformation matrix
+        R = np.array(matrix)[:3, :3]
+        rotation = Rotation.from_matrix(R)
+        yaw, pitch, roll = rotation.as_euler('yxz', degrees=True)
+
+        # Apply penalty formula
+        frontal = 1.0
+        frontal -= 0.015 * abs(yaw)
+        frontal -= 0.010 * abs(pitch)
+        frontal -= 0.012 * abs(roll)
+
+        # Clamp to [0.0, 1.0]
+        return max(0.0, min(1.0, frontal))
+
+    except (ValueError, IndexError) as e:
+        log.warning("Failed to compute head pose frontal: %s", e)
+        return 0.0
+
+
 def detect_faces(filepath: str) -> tuple[int, float, str, float]:
     """Detect faces using multi-scale short-range detection.
 
@@ -241,39 +311,53 @@ def _get_landmarker():
         opts = mp.tasks.vision.FaceLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
             output_face_blendshapes=True,
+            output_facial_transformation_matrixes=True,
             num_faces=5,
         )
         _landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(opts)
     return _landmarker
 
 
-def _extract_blendshape_scores(face_blendshapes) -> tuple[float, float]:
-    """Extract average eyes-open and smile scores from blendshape list."""
+def _extract_blendshape_scores(face_blendshapes, facial_transformation_matrixes=None) -> tuple[float, float, float, float]:
+    """Extract average expression scores and head pose from blendshapes + matrices.
+
+    Returns:
+        (eyes_open, smile, expression_naturalness, head_pose_frontal)
+    """
     total_eyes_open = 0.0
     total_smile = 0.0
+    total_naturalness = 0.0
+    total_frontal = 0.0
     num_faces = len(face_blendshapes)
 
-    for face_shapes in face_blendshapes:
-        shape_map = {s.category_name: s.score for s in face_shapes}
-
+    for i, face_shapes in enumerate(face_blendshapes):
         # Eyes open = 1.0 - blink (blink 0=open, 1=closed)
-        blink_left = shape_map.get("eyeBlinkLeft", 0.0)
-        blink_right = shape_map.get("eyeBlinkRight", 0.0)
+        blink_left = face_shapes[9].score if len(face_shapes) > 9 else 0.0
+        blink_right = face_shapes[10].score if len(face_shapes) > 10 else 0.0
         eyes_open = 1.0 - (blink_left + blink_right) / 2.0
         total_eyes_open += max(0.0, eyes_open)
 
         # Smile = average of left and right
-        smile_left = shape_map.get("mouthSmileLeft", 0.0)
-        smile_right = shape_map.get("mouthSmileRight", 0.0)
+        smile_left = face_shapes[44].score if len(face_shapes) > 44 else 0.0
+        smile_right = face_shapes[45].score if len(face_shapes) > 45 else 0.0
         total_smile += (smile_left + smile_right) / 2.0
+
+        # Expression naturalness
+        total_naturalness += _compute_expression_naturalness(face_shapes)
+
+        # Head pose frontal (if matrices available)
+        if facial_transformation_matrixes and i < len(facial_transformation_matrixes):
+            total_frontal += _compute_head_pose_frontal(facial_transformation_matrixes[i])
 
     return (
         round(total_eyes_open / num_faces, 4),
         round(total_smile / num_faces, 4),
+        round(total_naturalness / num_faces, 4),
+        round(total_frontal / num_faces, 4) if facial_transformation_matrixes else 0.0,
     )
 
 
-def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float]:
+def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float, float, float]:
     """Crop each detected face, upscale, and run landmarker on each crop."""
     import mediapipe as mp
 
@@ -290,10 +374,12 @@ def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float]:
             detections = _merge_detections(detections, extra) if detections else extra
 
     if not detections:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
     all_eyes = []
     all_smile = []
+    all_naturalness = []
+    all_frontal = []
     target_size = 512
 
     for det in detections:
@@ -324,37 +410,44 @@ def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float]:
         crop_result = landmarker.detect(crop_mp)
 
         if crop_result.face_blendshapes:
-            eyes, smile = _extract_blendshape_scores(crop_result.face_blendshapes)
+            eyes, smile, natural, frontal = _extract_blendshape_scores(
+                crop_result.face_blendshapes,
+                crop_result.facial_transformation_matrixes
+            )
             all_eyes.append(eyes)
             all_smile.append(smile)
+            all_naturalness.append(natural)
+            all_frontal.append(frontal)
 
     if not all_eyes:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
     return (
         round(sum(all_eyes) / len(all_eyes), 4),
         round(sum(all_smile) / len(all_smile), 4),
+        round(sum(all_naturalness) / len(all_naturalness), 4),
+        round(sum(all_frontal) / len(all_frontal), 4),
     )
 
 
-def analyze_expressions(filepath: str) -> tuple[float, float]:
-    """Analyze face expressions for eyes-open and smile scores.
+def analyze_expressions(filepath: str) -> tuple[float, float, float, float]:
+    """Analyze face expressions and head pose.
 
     Tries the full image first. If the landmarker can't find faces
     (common with distant/small faces), crops and upscales each detected
     face region and retries.
 
     Returns:
-        (eyes_open_score, smile_score) each in range [0.0, 1.0].
-        Averaged across all detected faces.
-        Returns (0.0, 0.0) on error or if no blendshapes found.
+        (eyes_open, smile, expression_naturalness, head_pose_frontal)
+        All scores in range [0.0, 1.0], averaged across detected faces.
+        Returns (0.0, 0.0, 0.0, 0.0) on error or if no faces found.
     """
     try:
         import mediapipe as mp
 
         img = cv2.imread(filepath)
         if img is None:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0
 
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -363,14 +456,17 @@ def analyze_expressions(filepath: str) -> tuple[float, float]:
         result = landmarker.detect(mp_image)
 
         if result.face_blendshapes:
-            return _extract_blendshape_scores(result.face_blendshapes)
+            return _extract_blendshape_scores(
+                result.face_blendshapes,
+                result.facial_transformation_matrixes
+            )
 
         # Full-image landmarker didn't find faces — crop+upscale fallback
         return _analyze_cropped_faces(rgb, landmarker)
 
     except Exception as e:
         log.warning("Expression analysis failed for %s: %s", filepath, e)
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
 
 
 def cleanup():

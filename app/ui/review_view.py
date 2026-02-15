@@ -99,6 +99,8 @@ class ThumbnailWidget(QFrame):
             tooltip_parts.append(f"Eyes Open: {self.photo.eyes_open_score * 100:.0f}%")
             tooltip_parts.append(f"Smile: {self.photo.smile_score * 100:.0f}%")
             tooltip_parts.append(f"Isolation: {self.photo.subject_isolation * 100:.0f}%")
+            tooltip_parts.append(f"Expression: {self.photo.expression_naturalness * 100:.0f}%")
+            tooltip_parts.append(f"Frontal: {self.photo.head_pose_frontal * 100:.0f}%")
         if self.photo.exif_datetime:
             tooltip_parts.append(f"Date: {self.photo.exif_datetime[:19]}")
         info_label.setToolTip("\n".join(tooltip_parts))

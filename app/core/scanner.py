@@ -26,7 +26,7 @@ def collect_files(root_folder: str) -> list[str]:
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext in SUPPORTED_EXTENSIONS:
-                files.append(os.path.join(dirpath, fname))
+                files.append(os.path.normpath(os.path.join(dirpath, fname)))
     files.sort()  # deterministic ordering
     log.info("Collected %d files from %s", len(files), root_folder)
     return files
@@ -189,10 +189,12 @@ def analyze_all_expressions(
             return analyzed
 
         rep = group[0]
-        eyes_open, smile = analyze_expressions(rep.filepath)
+        eyes_open, smile, expr_natural, head_frontal = analyze_expressions(rep.filepath)
         for p in group:
             p.eyes_open_score = eyes_open
             p.smile_score = smile
+            p.expression_naturalness = expr_natural
+            p.head_pose_frontal = head_frontal
             p.quality_score = rescore_with_faces(p)
 
         analyzed += len(group)
