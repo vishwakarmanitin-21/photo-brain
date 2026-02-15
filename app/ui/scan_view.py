@@ -62,23 +62,34 @@ class ScanView(QWidget):
 
         self._stat_labels: dict[str, QLabel] = {}
         stat_items = [
-            ("total_files", "Files found:"),
-            ("hashed", "Hashed:"),
-            ("duplicates", "Exact duplicates:"),
-            ("phash_computed", "Perceptual hashes:"),
-            ("scored", "Scored:"),
-            ("faces_detected", "Photos with faces:"),
-            ("events", "Events:"),
-            ("clusters", "Clusters:"),
+            ("total_files", "Files found:", False),
+            ("hashed", "Hashed:", False),
+            ("duplicates", "Exact duplicates:", False),
+            ("phash_computed", "Perceptual hashes:", False),
+            ("scored", "Scored:", False),
+            ("faces_detected", "Photos with faces:", False),
+            ("faces_close", "  Close-up faces:", True),
+            ("faces_far", "  Distant faces:", True),
+            ("faces_none", "  No faces:", True),
+            ("group_shots", "  Group shots (3+):", True),
+            ("expressions_analyzed", "Expressions analyzed:", False),
+            ("events", "Events:", False),
+            ("clusters", "Clusters:", False),
         ]
-        for row, (key, text) in enumerate(stat_items):
+        for row, (key, text, is_sub) in enumerate(stat_items):
             label = QLabel(text)
-            label.setStyleSheet("font-size: 13px;")
+            if is_sub:
+                label.setStyleSheet("font-size: 12px; color: #777;")
+            else:
+                label.setStyleSheet("font-size: 13px;")
             label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
             stats.addWidget(label, row, 0)
 
             value = QLabel("0")
-            value.setStyleSheet("font-size: 13px; font-weight: bold;")
+            if is_sub:
+                value.setStyleSheet("font-size: 12px; font-weight: bold; color: #555;")
+            else:
+                value.setStyleSheet("font-size: 13px; font-weight: bold;")
             value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             stats.addWidget(value, row, 1)
             self._stat_labels[key] = value

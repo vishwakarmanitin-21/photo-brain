@@ -1,0 +1,145 @@
+# Vibe Code Guide
+
+## Core Principles
+
+When making any code changes, follow these principles in order:
+
+### 1. Understand Before Acting
+
+**Deep Understanding Required:**
+- Fully comprehend the change request, including context and expected outcome
+- Identify the root cause of issues before proposing solutions
+- Understand how the change fits into the broader codebase architecture
+- Consider downstream effects and integration points
+
+**When in Doubt, Ask:**
+- Never make assumptions about unclear requirements
+- Ask for clarification on ambiguous requests
+- Confirm understanding of expected behavior before implementation
+- Seek input on edge cases or potential impacts
+
+### 2. Explore Better Solutions
+
+**Proactive Improvement:**
+- In the context of requested changes, identify opportunities for improvement
+- Share better ideas or alternative approaches when they exist
+- Suggest refactoring if it would improve code quality
+- Propose architectural improvements that align with the change
+
+**Balance Innovation with Pragmatism:**
+- Don't over-engineer simple requests
+- Consider technical debt vs. immediate needs
+- Respect existing patterns unless there's a compelling reason to change
+
+### 3. Prevent Regressions
+
+**Impact Analysis:**
+- Identify all code paths affected by the change
+- Review dependencies and dependent code
+- Consider both direct and indirect effects
+- Check for similar patterns elsewhere in the codebase that might need updates
+
+**Compatibility Checks:**
+- Ensure changes don't break existing functionality
+- Verify backward compatibility where required
+- Test integration points between components
+- Validate API contracts remain intact
+
+### 4. Verify Compilation and Functionality
+
+**Compilation Verification:**
+- After making changes, ensure the code compiles without errors
+- Fix any syntax errors, type mismatches, or import issues
+- Verify all dependencies are properly declared
+- Check for linting or formatting issues
+
+**Functional Verification:**
+- Test that the change works as expected
+- Verify the specific use case mentioned in the request
+- Test edge cases and error conditions
+- Confirm the change solves the original problem
+
+### 5. Code Review Mindset
+
+**Self-Review Checklist:**
+- Does the code follow established patterns and conventions?
+- Is the implementation clear and maintainable?
+- Are variable and function names descriptive?
+- Is error handling appropriate?
+- Are there any code smells or anti-patterns?
+
+**Integration Verification:**
+- Confirm frontend-backend integration is not broken
+- Verify API endpoints still function correctly
+- Check data flow between components
+- Test authentication/authorization if affected
+- Validate state management across the stack
+
+**Quality Checks:**
+- Code is readable and well-structured
+- Comments explain "why" not "what"
+- No debugging code left in (console.logs, commented code, etc.)
+- Performance implications considered
+- Security implications reviewed
+
+### 6. Maintain Comprehensive Documentation
+
+**README Updates Required:**
+- Document all changes, fixes, and enhancements
+- Update feature descriptions to reflect current implementation
+- Keep integration details current (APIs, third-party services, etc.)
+- Maintain accurate architecture descriptions
+
+**README Should Always Include:**
+- **Current Features**: Comprehensive list of what the application does
+- **Architecture Overview**: How components interact, design patterns used
+- **API Integrations**: External services, endpoints, authentication methods
+- **Configuration**: Environment variables, setup requirements
+- **Limitations**: Known issues, edge cases, future improvements needed
+- **Recent Changes**: What was added/fixed/enhanced in this update
+
+**Documentation Quality:**
+- Write for someone new to the project
+- Include examples where helpful
+- Keep technical accuracy high
+- Update diagrams or architecture docs if they exist
+
+## Workflow
+
+For each change request, follow this workflow:
+
+1. **Clarify** - Understand the request fully, ask questions
+2. **Analyze** - Assess impact, identify better approaches if they exist
+3. **Plan** - Consider regression risks, integration points
+4. **Implement** - Make the changes carefully
+5. **Verify** - Compile, test functionality, review integration
+6. **Document** - Update README with comprehensive details
+
+## When to Push Back
+
+It's appropriate to question or suggest alternatives when:
+- The requested change would introduce technical debt
+- A simpler approach would achieve the same goal
+- The change would break existing functionality
+- Requirements are unclear or contradictory
+- The change conflicts with architectural principles
+
+Always explain your reasoning and offer constructive alternatives.
+
+## Communication Style
+
+- Be collaborative, not prescriptive
+- Explain trade-offs when suggesting alternatives
+- Ask clarifying questions early
+- Confirm understanding before major changes
+- Share context about why certain approaches are better
+
+## Success Criteria
+
+A change is complete when:
+- ✅ The original request is fully addressed
+- ✅ No regressions introduced
+- ✅ Code compiles and runs without errors
+- ✅ Integration points verified
+- ✅ README updated with all relevant details
+- ✅ Code quality standards met

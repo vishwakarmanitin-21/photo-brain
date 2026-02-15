@@ -17,6 +17,12 @@ class DupType(Enum):
     NEAR = "near"
 
 
+class FaceDistance(Enum):
+    NONE = "none"       # no faces detected
+    CLOSE = "close"     # faces detected by short-range model (within ~2m)
+    FAR = "far"         # faces detected only by full-range model (distant)
+
+
 class SessionStatus(Enum):
     NEW = "NEW"
     SCANNING = "SCANNING"
@@ -44,6 +50,9 @@ class Photo:
     scan_order: int = 0
     face_count: int = 0
     face_area_ratio: float = 0.0
+    face_distance: FaceDistance = FaceDistance.NONE
+    eyes_open_score: float = 0.0
+    smile_score: float = 0.0
     exif_datetime: Optional[str] = None
     event_id: Optional[str] = None
 

@@ -39,6 +39,11 @@ class SetupView(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
 
+        author = QLabel("Created by Nitin Vishwakarma")
+        author.setStyleSheet("font-size: 11px; color: #999; font-style: italic;")
+        author.setAlignment(Qt.AlignCenter)
+        layout.addWidget(author)
+
         layout.addSpacing(30)
 
         # Folder picker row

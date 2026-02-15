@@ -35,13 +35,18 @@ def compute_brightness(filepath: str) -> float:
 
 
 def compute_quality_score(
-    sharpness: float, brightness: float, face_count: int = 0
+    sharpness: float,
+    brightness: float,
+    face_count: int = 0,
+    eyes_open_score: float = 0.0,
+    smile_score: float = 0.0,
 ) -> float:
-    face_bonus = 0.15 * min(face_count, 3)
     return (
-        0.65 * math.log(sharpness + 1)
-        + 0.20 * (brightness / 255.0)
-        + face_bonus
+        0.50 * math.log(sharpness + 1)
+        + 0.15 * (brightness / 255.0)
+        + 0.10 * min(face_count, 3)
+        + 0.15 * eyes_open_score
+        + 0.10 * smile_score
     )
 
 
@@ -58,8 +63,11 @@ def score_photo(filepath: str) -> tuple[float, float, float]:
 
 
 def rescore_with_faces(photo: "Photo") -> float:
-    """Recalculate quality score incorporating face count."""
-    return compute_quality_score(photo.sharpness, photo.brightness, photo.face_count)
+    """Recalculate quality score incorporating face count and expressions."""
+    return compute_quality_score(
+        photo.sharpness, photo.brightness, photo.face_count,
+        photo.eyes_open_score, photo.smile_score,
+    )
 
 
 def suggest_verdicts(

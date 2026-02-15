@@ -7,12 +7,12 @@ from typing import Optional
 
 from app.core.models import (
     Photo, Cluster, Event, SessionState, ApplyLogEntry,
-    Verdict, DupType, SessionStatus,
+    Verdict, DupType, FaceDistance, SessionStatus,
 )
 
 log = logging.getLogger("photobrain.session_store")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS session (
@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS photos (
     scan_order INTEGER DEFAULT 0,
     face_count INTEGER DEFAULT 0,
     face_area_ratio REAL DEFAULT 0.0,
+    face_distance TEXT DEFAULT 'none',
+    eyes_open_score REAL DEFAULT 0.0,
+    smile_score REAL DEFAULT 0.0,
     exif_datetime TEXT,
     event_id TEXT,
     FOREIGN KEY (session_id) REFERENCES session(id)
@@ -127,6 +130,19 @@ MIGRATION_V2_TO_V3 = [
     "UPDATE photos SET verdict='ARCHIVE' WHERE verdict='DELETE' AND user_override=0",
 ]
 
+# Migration from v3 to v4: add face_distance column
+MIGRATION_V3_TO_V4 = [
+    "ALTER TABLE photos ADD COLUMN face_distance TEXT DEFAULT 'none'",
+    # Backfill: photos with faces detected are assumed "close" (short-range was the only model)
+    "UPDATE photos SET face_distance='close' WHERE face_count > 0",
+]
+
+# Migration from v4 to v5: add expression scores
+MIGRATION_V4_TO_V5 = [
+    "ALTER TABLE photos ADD COLUMN eyes_open_score REAL DEFAULT 0.0",
+    "ALTER TABLE photos ADD COLUMN smile_score REAL DEFAULT 0.0",
+]
+
 
 class SessionStore:
     def __init__(self, db_path: str):
@@ -172,6 +188,28 @@ class SessionStore:
             log.info("Migrating database from v2 to v3 (DELETE → ARCHIVE)")
             for sql in MIGRATION_V2_TO_V3:
                 self._conn.execute(sql)
+            self._conn.commit()
+            version = 3
+
+        if version == 3:
+            log.info("Migrating database from v3 to v4 (add face_distance)")
+            for sql in MIGRATION_V3_TO_V4:
+                try:
+                    self._conn.execute(sql)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        log.warning("Migration statement failed: %s", e)
+            self._conn.commit()
+            version = 4
+
+        if version == 4:
+            log.info("Migrating database from v4 to v5 (add expression scores)")
+            for sql in MIGRATION_V4_TO_V5:
+                try:
+                    self._conn.execute(sql)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        log.warning("Migration statement failed: %s", e)
             self._conn.commit()
 
         self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
@@ -260,14 +298,17 @@ class SessionStore:
                    (id, session_id, filepath, filename, file_size,
                     sha256, phash, sharpness, brightness, quality_score,
                     cluster_id, verdict, dup_type, user_override, thumb_path,
-                    scan_order, face_count, face_area_ratio, exif_datetime, event_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    scan_order, face_count, face_area_ratio, face_distance,
+                    eyes_open_score, smile_score, exif_datetime, event_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
                     (p.id, session_id, p.filepath, p.filename, p.file_size,
                      p.sha256, p.phash, p.sharpness, p.brightness, p.quality_score,
                      p.cluster_id, p.verdict.value, p.dup_type.value,
                      int(p.user_override), p.thumb_path, p.scan_order,
-                     p.face_count, p.face_area_ratio, p.exif_datetime, p.event_id)
+                     p.face_count, p.face_area_ratio, p.face_distance.value,
+                     p.eyes_open_score, p.smile_score,
+                     p.exif_datetime, p.event_id)
                     for p in photos
                 ],
             )
@@ -301,14 +342,16 @@ class SessionStore:
                 """UPDATE photos SET sha256=?, phash=?, sharpness=?, brightness=?,
                    quality_score=?, cluster_id=?, verdict=?, dup_type=?,
                    user_override=?, thumb_path=?, face_count=?, face_area_ratio=?,
+                   face_distance=?, eyes_open_score=?, smile_score=?,
                    exif_datetime=?, event_id=?
                    WHERE id=?""",
                 [
                     (p.sha256, p.phash, p.sharpness, p.brightness,
                      p.quality_score, p.cluster_id, p.verdict.value,
                      p.dup_type.value, int(p.user_override), p.thumb_path,
-                     p.face_count, p.face_area_ratio, p.exif_datetime,
-                     p.event_id, p.id)
+                     p.face_count, p.face_area_ratio, p.face_distance.value,
+                     p.eyes_open_score, p.smile_score,
+                     p.exif_datetime, p.event_id, p.id)
                     for p in photos
                 ],
             )
@@ -463,6 +506,9 @@ class SessionStore:
             scan_order=row["scan_order"],
             face_count=row["face_count"],
             face_area_ratio=row["face_area_ratio"],
+            face_distance=FaceDistance(row["face_distance"]) if row["face_distance"] else FaceDistance.NONE,
+            eyes_open_score=row["eyes_open_score"] or 0.0,
+            smile_score=row["smile_score"] or 0.0,
             exif_datetime=row["exif_datetime"],
             event_id=row["event_id"],
         )

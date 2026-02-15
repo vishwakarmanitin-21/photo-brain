@@ -4,11 +4,11 @@ import uuid
 import logging
 from typing import Callable, Optional
 
-from app.core.models import Photo, Cluster, Event, Verdict, DupType
+from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.hashing import compute_sha256, compute_phash
 from app.core.scoring import score_photo, suggest_verdicts, rescore_with_faces
 from app.core.clustering import build_clusters, group_by_sha256
-from app.core.faces import detect_faces
+from app.core.faces import detect_faces, analyze_expressions
 from app.core.events import extract_exif_datetime, build_events
 from app.util.paths import SUPPORTED_EXTENSIONS, SKIP_DIRS
 
@@ -119,34 +119,87 @@ def detect_all_faces(
     photos: list[Photo],
     progress_cb: Optional[ProgressCallback] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
-) -> int:
+) -> dict[str, int]:
     """Detect faces for each unique SHA256 group, copy results to group.
 
-    Returns total number of photos with at least one face.
+    Returns dict with keys: faces_total, faces_close, faces_far,
+    faces_none, group_shots (photos with 3+ faces).
     """
     sha_groups = group_by_sha256(photos)
     total = len(sha_groups)
-    faces_found = 0
+    stats = {
+        "faces_total": 0,
+        "faces_close": 0,
+        "faces_far": 0,
+        "faces_none": 0,
+        "group_shots": 0,
+    }
 
     for i, (sha_key, group) in enumerate(sha_groups.items()):
         if cancel_check and cancel_check():
-            return faces_found
+            return stats
 
         rep = group[0]
-        face_count, face_area_ratio = detect_faces(rep.filepath)
+        face_count, face_area_ratio, face_dist = detect_faces(rep.filepath)
+        fd = FaceDistance(face_dist)
         for p in group:
             p.face_count = face_count
             p.face_area_ratio = face_area_ratio
-            # Recalculate quality score with face bonus
-            p.quality_score = rescore_with_faces(p)
+            p.face_distance = fd
 
+        n = len(group)
         if face_count > 0:
-            faces_found += len(group)
+            stats["faces_total"] += n
+            if fd == FaceDistance.CLOSE:
+                stats["faces_close"] += n
+            else:
+                stats["faces_far"] += n
+            if face_count >= 3:
+                stats["group_shots"] += n
+        else:
+            stats["faces_none"] += n
 
         if progress_cb and (i % 30 == 0 or i == total - 1):
             progress_cb(i + 1, total, rep.filename)
 
-    return faces_found
+    return stats
+
+
+def analyze_all_expressions(
+    photos: list[Photo],
+    progress_cb: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> int:
+    """Analyze expressions for photos with faces, then rescore.
+
+    For close-up faces, runs the landmarker on the full image.
+    For distant faces, crops and upscales each face region before analysis.
+
+    Returns count of photos where expressions were analyzed.
+    """
+    sha_groups = group_by_sha256(photos)
+    # Process all groups where faces were detected (close or far)
+    face_groups = {k: g for k, g in sha_groups.items() if g[0].face_count > 0}
+    total = len(face_groups)
+    analyzed = 0
+
+    for i, (sha_key, group) in enumerate(face_groups.items()):
+        if cancel_check and cancel_check():
+            return analyzed
+
+        rep = group[0]
+        eyes_open, smile = analyze_expressions(rep.filepath)
+        for p in group:
+            p.eyes_open_score = eyes_open
+            p.smile_score = smile
+            p.quality_score = rescore_with_faces(p)
+
+        analyzed += len(group)
+
+        if progress_cb and (i % 30 == 0 or i == total - 1):
+            progress_cb(i + 1, total, rep.filename)
+
+    return analyzed
 
 
 def extract_dates(

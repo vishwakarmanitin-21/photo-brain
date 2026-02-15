@@ -5,8 +5,8 @@ from PySide6.QtCore import QThread, Signal
 
 from app.core.scanner import (
     collect_files, compute_hashes, compute_phashes,
-    compute_scores, detect_all_faces, extract_dates,
-    build_photo_events, run_clustering, assign_verdicts,
+    compute_scores, detect_all_faces, analyze_all_expressions,
+    extract_dates, build_photo_events, run_clustering, assign_verdicts,
 )
 from app.core.session_store import SessionStore
 from app.core.models import SessionStatus
@@ -131,10 +131,29 @@ class ScanWorker(QThread):
                 self.progress_updated.emit("Faces", cur, total)
                 self.current_file.emit(fname)
 
-            faces_found = detect_all_faces(photos, face_progress, self._is_cancelled)
+            face_stats = detect_all_faces(photos, face_progress, self._is_cancelled)
             if self._cancelled:
                 return
-            self.stats_updated.emit("faces_detected", faces_found)
+            self.stats_updated.emit("faces_detected", face_stats["faces_total"])
+            self.stats_updated.emit("faces_close", face_stats["faces_close"])
+            self.stats_updated.emit("faces_far", face_stats["faces_far"])
+            self.stats_updated.emit("faces_none", face_stats["faces_none"])
+            self.stats_updated.emit("group_shots", face_stats["group_shots"])
+
+            # Phase 5b: Expression analysis (only on photos with faces)
+            if face_stats["faces_total"] > 0:
+                self.phase_changed.emit("Analyzing expressions...")
+
+                def expr_progress(cur, total, fname):
+                    self.progress_updated.emit("Expressions", cur, total)
+                    self.current_file.emit(fname)
+
+                expr_count = analyze_all_expressions(
+                    photos, expr_progress, self._is_cancelled
+                )
+                if self._cancelled:
+                    return
+                self.stats_updated.emit("expressions_analyzed", expr_count)
 
         # Phase 6: EXIF dates + event grouping
         self.phase_changed.emit("Extracting dates...")

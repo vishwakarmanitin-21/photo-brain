@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl
 from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices
 
-from app.core.models import Photo, Cluster, Event, Verdict, DupType
+from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 
 log = logging.getLogger("photobrain.review_view")
 
@@ -26,7 +26,9 @@ COLOR_SELECTED = "#2196F3"
 
 # Filter constants
 FACE_FILTER_ALL = "All Photos"
-FACE_FILTER_HAS_FACES = "Has Faces"
+FACE_FILTER_CLOSE = "Faces (Close-up)"
+FACE_FILTER_FAR = "Faces (Distant)"
+FACE_FILTER_ANY_FACES = "Has Any Faces"
 FACE_FILTER_NO_FACES = "No Faces"
 FACE_FILTER_GROUP = "Group Shots (3+)"
 
@@ -79,6 +81,8 @@ class ThumbnailWidget(QFrame):
             face_text = f"{self.photo.face_count} face"
             if self.photo.face_count > 1:
                 face_text += "s"
+            dist_tag = "close" if self.photo.face_distance == FaceDistance.CLOSE else "far"
+            face_text += f" ({dist_tag})"
             info_parts.append(face_text)
         info_label = QLabel(" | ".join(info_parts))
         info_label.setStyleSheet("font-size: 9px; color: #888;")
@@ -91,6 +95,9 @@ class ThumbnailWidget(QFrame):
             f"Brightness: {self.photo.brightness:.1f}",
             f"Faces: {self.photo.face_count}",
         ]
+        if self.photo.face_count > 0:
+            tooltip_parts.append(f"Eyes Open: {self.photo.eyes_open_score * 100:.0f}%")
+            tooltip_parts.append(f"Smile: {self.photo.smile_score * 100:.0f}%")
         if self.photo.exif_datetime:
             tooltip_parts.append(f"Date: {self.photo.exif_datetime[:19]}")
         info_label.setToolTip("\n".join(tooltip_parts))
@@ -253,8 +260,8 @@ class ReviewView(QWidget):
         filter_bar.addWidget(QLabel("Faces:"))
         self._face_filter = QComboBox()
         self._face_filter.addItems([
-            FACE_FILTER_ALL, FACE_FILTER_HAS_FACES,
-            FACE_FILTER_NO_FACES, FACE_FILTER_GROUP,
+            FACE_FILTER_ALL, FACE_FILTER_CLOSE, FACE_FILTER_FAR,
+            FACE_FILTER_ANY_FACES, FACE_FILTER_NO_FACES, FACE_FILTER_GROUP,
         ])
         self._face_filter.currentTextChanged.connect(self._apply_filters)
         self._face_filter.setMinimumWidth(140)
@@ -472,7 +479,11 @@ class ReviewView(QWidget):
             face_ids: set[str] = set()
             for photos in self._cluster_photos.values():
                 for p in photos:
-                    if face_filter == FACE_FILTER_HAS_FACES and p.face_count > 0:
+                    if face_filter == FACE_FILTER_CLOSE and p.face_distance == FaceDistance.CLOSE:
+                        face_ids.add(p.id)
+                    elif face_filter == FACE_FILTER_FAR and p.face_distance == FaceDistance.FAR:
+                        face_ids.add(p.id)
+                    elif face_filter == FACE_FILTER_ANY_FACES and p.face_count > 0:
                         face_ids.add(p.id)
                     elif face_filter == FACE_FILTER_NO_FACES and p.face_count == 0:
                         face_ids.add(p.id)
