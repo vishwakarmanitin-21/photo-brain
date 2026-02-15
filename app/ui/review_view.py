@@ -15,7 +15,7 @@ from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistanc
 log = logging.getLogger("photobrain.review_view")
 
 # Zoom configuration
-ZOOM_LEVELS = [1, 2, 3, 4]
+ZOOM_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8]
 BASE_THUMB_SIZE = 180  # Base display size at 1x zoom
 THUMB_DISPLAY_SIZE = 180  # Keep for backward compatibility
 GRID_COLUMNS = 4  # Default at 1x zoom
@@ -348,9 +348,15 @@ class ReviewView(QWidget):
         self._zoom_2x_btn = QPushButton("2x")
         self._zoom_3x_btn = QPushButton("3x")
         self._zoom_4x_btn = QPushButton("4x")
+        self._zoom_5x_btn = QPushButton("5x")
+        self._zoom_6x_btn = QPushButton("6x")
+        self._zoom_7x_btn = QPushButton("7x")
+        self._zoom_8x_btn = QPushButton("8x")
 
         for btn in [self._zoom_1x_btn, self._zoom_2x_btn,
-                    self._zoom_3x_btn, self._zoom_4x_btn]:
+                    self._zoom_3x_btn, self._zoom_4x_btn,
+                    self._zoom_5x_btn, self._zoom_6x_btn,
+                    self._zoom_7x_btn, self._zoom_8x_btn]:
             btn.setCheckable(True)
             btn.setFixedWidth(40)
             zoom_layout.addWidget(btn)
@@ -362,6 +368,10 @@ class ReviewView(QWidget):
         self._zoom_2x_btn.clicked.connect(lambda: self._set_zoom_level(2))
         self._zoom_3x_btn.clicked.connect(lambda: self._set_zoom_level(3))
         self._zoom_4x_btn.clicked.connect(lambda: self._set_zoom_level(4))
+        self._zoom_5x_btn.clicked.connect(lambda: self._set_zoom_level(5))
+        self._zoom_6x_btn.clicked.connect(lambda: self._set_zoom_level(6))
+        self._zoom_7x_btn.clicked.connect(lambda: self._set_zoom_level(7))
+        self._zoom_8x_btn.clicked.connect(lambda: self._set_zoom_level(8))
 
         toolbar.addLayout(zoom_layout)
         toolbar.addSpacing(10)
@@ -549,8 +559,8 @@ class ReviewView(QWidget):
 
     def _get_grid_columns(self) -> int:
         """Get column count based on zoom level."""
-        # 1x: 4 cols, 2x: 3 cols, 3x: 2 cols, 4x: 1 col
-        columns_map = {1: 4, 2: 3, 3: 2, 4: 1}
+        # 1x: 4 cols, 2x: 3 cols, 3x: 2 cols, 4x-8x: 1 col
+        columns_map = {1: 4, 2: 3, 3: 2, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1}
         return columns_map.get(self._zoom_level, 4)
 
     def _load_high_res_pixmap(self, photo: Photo, display_size: int) -> QPixmap:
@@ -587,7 +597,7 @@ class ReviewView(QWidget):
 
     def _zoom_in(self):
         """Increase zoom level."""
-        if self._zoom_level < 4:
+        if self._zoom_level < 8:
             self._set_zoom_level(self._zoom_level + 1)
 
     def _zoom_out(self):
@@ -607,6 +617,10 @@ class ReviewView(QWidget):
         self._zoom_2x_btn.setChecked(level == 2)
         self._zoom_3x_btn.setChecked(level == 3)
         self._zoom_4x_btn.setChecked(level == 4)
+        self._zoom_5x_btn.setChecked(level == 5)
+        self._zoom_6x_btn.setChecked(level == 6)
+        self._zoom_7x_btn.setChecked(level == 7)
+        self._zoom_8x_btn.setChecked(level == 8)
 
         # Rebuild grid with new zoom
         self._rebuild_grid_with_zoom()
