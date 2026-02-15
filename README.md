@@ -100,7 +100,13 @@ Browse clusters of similar photos in a visual grid:
 - **Red border** = DELETE
 - **Gray border** = undecided (REVIEW)
 
-Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, isolation %, expression naturalness %, and head pose frontal %. Filter by face distance, events, or group shots.
+**Zoom Controls:** Use 1x/2x/3x/4x buttons or `+`/`-` keys to adjust thumbnail size. Grid automatically reflows from 4 columns (1x) down to 1 column (4x) for better detail view. At 2x-4x zoom, thumbnails load high-quality images from originals.
+
+**Hover Preview:** Hold `Alt` and hover over any thumbnail to see a full-size preview in a floating overlay — perfect for quick quality checks without opening files.
+
+**Tooltips:** Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, isolation %, expression naturalness %, and head pose frontal %.
+
+**Filters:** Filter by face distance, events, or group shots.
 
 ### 4. Apply
 
@@ -130,6 +136,10 @@ Changed your mind? Click "Undo Last Apply" to restore all moved files to their o
 | `J` / `Down` | Next cluster |
 | `Up` | Previous cluster |
 | `Left` / `Right` | Navigate photos within a cluster |
+| `+` / `=` | Zoom in (increase thumbnail size) |
+| `-` | Zoom out (decrease thumbnail size) |
+| `0` | Reset zoom to 1x |
+| `Alt` + hover | Show full-size preview (hold Alt while hovering over thumbnail) |
 | `Ctrl+Enter` | Apply changes |
 | `Ctrl+Z` | Undo last apply |
 

@@ -5,17 +5,20 @@ import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget,
     QListWidgetItem, QScrollArea, QGridLayout, QLabel, QFrame,
-    QPushButton, QSizePolicy, QComboBox,
+    QPushButton, QSizePolicy, QComboBox, QApplication,
 )
-from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl
-from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices
+from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint
+from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 
 log = logging.getLogger("photobrain.review_view")
 
-THUMB_DISPLAY_SIZE = 180
-GRID_COLUMNS = 4
+# Zoom configuration
+ZOOM_LEVELS = [1, 2, 3, 4]
+BASE_THUMB_SIZE = 180  # Base display size at 1x zoom
+THUMB_DISPLAY_SIZE = 180  # Keep for backward compatibility
+GRID_COLUMNS = 4  # Default at 1x zoom
 
 # Colors
 COLOR_KEEP = "#4CAF50"
@@ -35,18 +38,78 @@ FACE_FILTER_GROUP = "Group Shots (3+)"
 EVENT_FILTER_ALL = "All Events"
 
 
+class HoverPreviewWidget(QWidget):
+    """Floating preview that shows full-size photo on hover."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        # Frame with shadow
+        frame = QFrame()
+        frame.setStyleSheet("background: white; border: 2px solid #333;")
+        frame_layout = QVBoxLayout(frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._image_label = QLabel()
+        self._image_label.setAlignment(Qt.AlignCenter)
+        frame_layout.addWidget(self._image_label)
+
+        layout.addWidget(frame)
+
+        self.hide()
+
+    def show_preview(self, pixmap: QPixmap, cursor_pos: QPoint):
+        """Show preview near cursor position."""
+        # Scale to max 800×800 while preserving aspect ratio
+        scaled = pixmap.scaled(
+            800, 800,
+            Qt.KeepAspectRatio, Qt.SmoothTransformation,
+        )
+        self._image_label.setPixmap(scaled)
+        self.adjustSize()
+
+        # Position near cursor, offset to avoid covering thumbnail
+        x = cursor_pos.x() + 20
+        y = cursor_pos.y() + 20
+
+        # Adjust if would go off-screen
+        screen = QApplication.primaryScreen().geometry()
+        if x + self.width() > screen.right():
+            x = cursor_pos.x() - self.width() - 20
+        if y + self.height() > screen.bottom():
+            y = cursor_pos.y() - self.height() - 20
+
+        self.move(x, y)
+        self.show()
+        self.raise_()
+
+    def hide_preview(self):
+        """Hide preview."""
+        self.hide()
+
+
 class ThumbnailWidget(QFrame):
     """Single photo thumbnail with verdict indicator and selection."""
 
     clicked = Signal(str)  # photo_id
     verdict_changed = Signal(str, str)  # photo_id, verdict_value
+    hovered = Signal(str, QPoint)  # photo_id, cursor_pos
+    unhovered = Signal()
 
     def __init__(self, photo: Photo, parent=None):
         super().__init__(parent)
         self.photo = photo
         self._selected = False
-        self.setFixedSize(THUMB_DISPLAY_SIZE + 16, THUMB_DISPLAY_SIZE + 100)
+        self._hover_active = False
+        self._display_size = BASE_THUMB_SIZE
+        self.setFixedSize(BASE_THUMB_SIZE + 16, BASE_THUMB_SIZE + 100)
         self.setCursor(Qt.PointingHandCursor)
+        self.setMouseTracking(True)  # Enable mouse tracking for hover
         self._build_ui()
         self._update_style()
 
@@ -57,7 +120,7 @@ class ThumbnailWidget(QFrame):
 
         # Thumbnail image
         self._image_label = QLabel()
-        self._image_label.setFixedSize(THUMB_DISPLAY_SIZE, THUMB_DISPLAY_SIZE)
+        self._image_label.setFixedSize(self._display_size, self._display_size)
         self._image_label.setAlignment(Qt.AlignCenter)
         self._image_label.setStyleSheet("background-color: #f0f0f0;")
         self._image_label.setText("Loading...")
@@ -153,13 +216,26 @@ class ThumbnailWidget(QFrame):
         self.update_verdict(verdict)
         self.verdict_changed.emit(self.photo.id, verdict.value)
 
-    def set_pixmap(self, pixmap: QPixmap):
+    def set_pixmap(self, pixmap: QPixmap, display_size: int = None):
+        """Set pixmap scaled to display_size."""
+        if display_size is None:
+            display_size = self._display_size
+
         scaled = pixmap.scaled(
-            THUMB_DISPLAY_SIZE, THUMB_DISPLAY_SIZE,
+            display_size, display_size,
             Qt.KeepAspectRatio, Qt.SmoothTransformation,
         )
         self._image_label.setPixmap(scaled)
+        self._image_label.setFixedSize(display_size, display_size)
         self._image_label.setText("")
+
+    def update_size(self, display_size: int):
+        """Resize widget to accommodate new display size."""
+        self._display_size = display_size
+        # Widget width = display_size + 16px padding
+        # Widget height = display_size + 116px UI chrome (was 100px + 16px padding)
+        self.setFixedSize(display_size + 16, display_size + 116)
+        self._image_label.setFixedSize(display_size, display_size)
 
     def set_selected(self, selected: bool):
         self._selected = selected
@@ -205,6 +281,22 @@ class ThumbnailWidget(QFrame):
             QDesktopServices.openUrl(QUrl.fromLocalFile(filepath))
         super().mouseDoubleClickEvent(event)
 
+    def enterEvent(self, event):
+        """Mouse entered widget area."""
+        # Only show preview if Alt is pressed
+        if QApplication.keyboardModifiers() & Qt.AltModifier:
+            self._hover_active = True
+            cursor_pos = QCursor.pos()
+            self.hovered.emit(self.photo.id, cursor_pos)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Mouse left widget area."""
+        if self._hover_active:
+            self._hover_active = False
+            self.unhovered.emit()
+        super().leaveEvent(event)
+
 
 class ReviewView(QWidget):
     """Main review interface with cluster list and thumbnail grid."""
@@ -223,6 +315,8 @@ class ReviewView(QWidget):
         self._thumb_widgets: dict[str, ThumbnailWidget] = {}
         self._current_cluster_idx = -1
         self._selected_photo_id: str | None = None
+        self._current_photos: list[Photo] = []  # Current cluster photos
+        self._zoom_level = 1  # Current zoom level (1x/2x/3x/4x)
         self._build_ui()
         self._bind_shortcuts()
 
@@ -245,6 +339,32 @@ class ReviewView(QWidget):
         self._undo_btn.setEnabled(False)
         self._undo_btn.clicked.connect(self.undo_requested.emit)
         toolbar.addWidget(self._undo_btn)
+
+        # Zoom controls
+        zoom_layout = QHBoxLayout()
+        zoom_layout.addWidget(QLabel("Zoom:"))
+
+        self._zoom_1x_btn = QPushButton("1x")
+        self._zoom_2x_btn = QPushButton("2x")
+        self._zoom_3x_btn = QPushButton("3x")
+        self._zoom_4x_btn = QPushButton("4x")
+
+        for btn in [self._zoom_1x_btn, self._zoom_2x_btn,
+                    self._zoom_3x_btn, self._zoom_4x_btn]:
+            btn.setCheckable(True)
+            btn.setFixedWidth(40)
+            zoom_layout.addWidget(btn)
+
+        self._zoom_1x_btn.setChecked(True)  # Default 1x
+
+        # Connect zoom buttons
+        self._zoom_1x_btn.clicked.connect(lambda: self._set_zoom_level(1))
+        self._zoom_2x_btn.clicked.connect(lambda: self._set_zoom_level(2))
+        self._zoom_3x_btn.clicked.connect(lambda: self._set_zoom_level(3))
+        self._zoom_4x_btn.clicked.connect(lambda: self._set_zoom_level(4))
+
+        toolbar.addLayout(zoom_layout)
+        toolbar.addSpacing(10)
 
         self._apply_btn = QPushButton("Apply Changes")
         self._apply_btn.setStyleSheet(
@@ -415,6 +535,153 @@ class ReviewView(QWidget):
         QShortcut(QKeySequence(Qt.Key_Left), self, self._select_prev_photo)
         QShortcut(QKeySequence("Ctrl+Return"), self, self.apply_requested.emit)
         QShortcut(QKeySequence("Ctrl+Z"), self, self.undo_requested.emit)
+        # Zoom shortcuts
+        QShortcut(QKeySequence("+"), self, self._zoom_in)
+        QShortcut(QKeySequence("="), self, self._zoom_in)  # Also + without Shift
+        QShortcut(QKeySequence("-"), self, self._zoom_out)
+        QShortcut(QKeySequence("0"), self, lambda: self._set_zoom_level(1))  # Reset
+
+    # ── Zoom helper methods ──────────────────────────────
+
+    def _get_display_size(self) -> int:
+        """Get current thumbnail display size based on zoom level."""
+        return BASE_THUMB_SIZE * self._zoom_level
+
+    def _get_grid_columns(self) -> int:
+        """Get column count based on zoom level."""
+        # 1x: 4 cols, 2x: 3 cols, 3x: 2 cols, 4x: 1 col
+        columns_map = {1: 4, 2: 3, 3: 2, 4: 1}
+        return columns_map.get(self._zoom_level, 4)
+
+    def _load_high_res_pixmap(self, photo: Photo, display_size: int) -> QPixmap:
+        """Load photo from original file, scaled to display_size with high quality."""
+        from PIL import Image
+        from io import BytesIO
+
+        try:
+            # Load original
+            img = Image.open(photo.filepath)
+
+            # Convert to RGB if needed
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            # Resize with high-quality Lanczos filter
+            img.thumbnail((display_size, display_size), Image.Resampling.LANCZOS)
+
+            # Convert PIL → QPixmap
+            buffer = BytesIO()
+            img.save(buffer, format='JPEG', quality=95)
+            buffer.seek(0)
+
+            pixmap = QPixmap()
+            pixmap.loadFromData(buffer.read())
+            return pixmap
+
+        except Exception as e:
+            log.warning("Failed to load high-res for %s: %s", photo.filepath, e)
+            # Fallback to cached thumbnail
+            if photo.thumb_path and os.path.isfile(photo.thumb_path):
+                return QPixmap(photo.thumb_path)
+            return QPixmap()
+
+    def _zoom_in(self):
+        """Increase zoom level."""
+        if self._zoom_level < 4:
+            self._set_zoom_level(self._zoom_level + 1)
+
+    def _zoom_out(self):
+        """Decrease zoom level."""
+        if self._zoom_level > 1:
+            self._set_zoom_level(self._zoom_level - 1)
+
+    def _set_zoom_level(self, level: int):
+        """Change zoom level and rebuild grid."""
+        if level not in ZOOM_LEVELS:
+            return
+
+        self._zoom_level = level
+
+        # Update button states
+        self._zoom_1x_btn.setChecked(level == 1)
+        self._zoom_2x_btn.setChecked(level == 2)
+        self._zoom_3x_btn.setChecked(level == 3)
+        self._zoom_4x_btn.setChecked(level == 4)
+
+        # Rebuild grid with new zoom
+        self._rebuild_grid_with_zoom()
+
+        # Re-select current photo if any
+        if self._selected_photo_id:
+            widget = self._thumb_widgets.get(self._selected_photo_id)
+            if widget:
+                widget.set_selected(True)
+
+    def _rebuild_grid_with_zoom(self):
+        """Rebuild thumbnail grid with current zoom level."""
+        # Clear existing grid
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+        self._thumb_widgets.clear()
+
+        if not self._current_photos:
+            return
+
+        display_size = self._get_display_size()
+        grid_columns = self._get_grid_columns()
+
+        for i, photo in enumerate(self._current_photos):
+            widget = ThumbnailWidget(photo)
+            widget.update_size(display_size)
+
+            # Load high-res or cached thumbnail
+            if self._zoom_level > 1:
+                pixmap = self._load_high_res_pixmap(photo, display_size)
+            else:
+                # Use cached 200×200 for 1x
+                if photo.thumb_path and os.path.isfile(photo.thumb_path):
+                    pixmap = QPixmap(photo.thumb_path)
+                else:
+                    pixmap = QPixmap()
+
+            widget.set_pixmap(pixmap, display_size)
+
+            # Connect signals
+            widget.clicked.connect(self._on_photo_clicked)
+            widget.verdict_changed.connect(self._on_verdict_changed)
+            widget.hovered.connect(self._show_hover_preview)
+            widget.unhovered.connect(self._hide_hover_preview)
+
+            # Add to grid
+            row = i // grid_columns
+            col = i % grid_columns
+            self._grid_layout.addWidget(widget, row, col)
+
+            self._thumb_widgets[photo.id] = widget
+
+    def _show_hover_preview(self, photo_id: str, cursor_pos: QPoint):
+        """Show full-size preview on hover."""
+        photo = next((p for p in self._current_photos if p.id == photo_id), None)
+        if not photo:
+            return
+
+        # Load full-size from original
+        pixmap = QPixmap(photo.filepath)
+        if pixmap.isNull():
+            return
+
+        if not hasattr(self, '_hover_preview'):
+            self._hover_preview = HoverPreviewWidget(self)
+
+        self._hover_preview.show_preview(pixmap, cursor_pos)
+
+    def _hide_hover_preview(self):
+        """Hide hover preview."""
+        if hasattr(self, '_hover_preview'):
+            self._hover_preview.hide_preview()
 
     # ── Data loading ─────────────────────────────────────
 
@@ -566,22 +833,8 @@ class ReviewView(QWidget):
         )
 
     def _show_cluster_photos(self, cluster: Cluster, photos: list[Photo]):
-        self._clear_grid()
-
-        for i, photo in enumerate(photos):
-            widget = ThumbnailWidget(photo)
-            widget.clicked.connect(self._on_photo_clicked)
-            widget.verdict_changed.connect(self._on_thumb_verdict_changed)
-
-            if photo.thumb_path and os.path.isfile(photo.thumb_path):
-                pixmap = QPixmap(photo.thumb_path)
-                if not pixmap.isNull():
-                    widget.set_pixmap(pixmap)
-
-            row = i // GRID_COLUMNS
-            col = i % GRID_COLUMNS
-            self._grid_layout.addWidget(widget, row, col)
-            self._thumb_widgets[photo.id] = widget
+        self._current_photos = photos
+        self._rebuild_grid_with_zoom()
 
         if photos:
             self._select_photo(photos[0].id)

@@ -107,8 +107,10 @@ venv\Scripts\python run.py
 - Per-photo buttons (Keep/Archive/Delete) + cluster-level (Keep All/Archive All/Delete All)
 - Double-click thumbnail to open photo in default viewer
 - Scan summary with "Continue to Review" button
-- Keyboard shortcuts: K (Keep), A (Archive), D (Delete), R (Review)
-- Thumbnail tooltips show Eyes Open %, Smile %, and Isolation % for photos with faces
+- Keyboard shortcuts: K (Keep), A (Archive), D (Delete), R (Review), +/- (Zoom), 0 (Reset zoom)
+- Thumbnail zoom: 1x/2x/3x/4x with dynamic grid reflow (4→3→2→1 columns)
+- Hover preview: Alt+hover shows full-size photo in floating overlay
+- Thumbnail tooltips show Eyes Open %, Smile %, Isolation %, Expression %, and Frontal % for photos with faces
 - Supports JPEG + PNG only
 - pHash clustering is O(n^2) — fine for ~5000 photos
 
