@@ -651,7 +651,7 @@ class ReviewView(QWidget):
 
             # Connect signals
             widget.clicked.connect(self._on_photo_clicked)
-            widget.verdict_changed.connect(self._on_verdict_changed)
+            widget.verdict_changed.connect(self._on_thumb_verdict_changed)
             widget.hovered.connect(self._show_hover_preview)
             widget.unhovered.connect(self._hide_hover_preview)
 
