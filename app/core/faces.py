@@ -34,7 +34,6 @@ _MODELS = {
 
 # Downscale factors for multi-scale detection.
 # Original image catches close-up faces; downscaled versions catch distant ones.
-# Each scale halves the long edge: 50%, 25% of original.
 _DOWNSCALE_FACTORS = [0.5, 0.25]
 
 
@@ -102,63 +101,135 @@ def _detect_at_scale(detector, rgb, scale: float):
     return mapped
 
 
-def detect_faces(filepath: str) -> tuple[int, float, str]:
+def _bb_iou(bb1, bb2) -> float:
+    """Compute Intersection over Union for two bounding boxes."""
+    x1 = max(bb1.origin_x, bb2.origin_x)
+    y1 = max(bb1.origin_y, bb2.origin_y)
+    x2 = min(bb1.origin_x + bb1.width, bb2.origin_x + bb2.width)
+    y2 = min(bb1.origin_y + bb1.height, bb2.origin_y + bb2.height)
+
+    if x1 >= x2 or y1 >= y2:
+        return 0.0
+
+    intersection = (x2 - x1) * (y2 - y1)
+    area1 = bb1.width * bb1.height
+    area2 = bb2.width * bb2.height
+    union = area1 + area2 - intersection
+
+    return intersection / union if union > 0 else 0.0
+
+
+def _merge_detections(existing, new_dets, iou_threshold=0.3):
+    """Add new detections that don't overlap with existing ones."""
+    merged = list(existing)
+    for det in new_dets:
+        overlaps = any(
+            _bb_iou(det.bounding_box, e.bounding_box) > iou_threshold
+            for e in merged
+        )
+        if not overlaps:
+            merged.append(det)
+    return merged
+
+
+def _compute_isolation(face_areas: list[float]) -> float:
+    """Compute subject isolation score from face area distribution.
+
+    Returns 1.0 for clean compositions (single face or uniform group).
+    Returns < 1.0 when small background faces are present alongside
+    larger primary subjects.
+    """
+    if len(face_areas) <= 1:
+        return 1.0
+
+    largest = max(face_areas)
+    # Faces >= 25% of the largest face are "primary" (intentional subjects)
+    primary_area = sum(a for a in face_areas if a >= largest * 0.25)
+    total_area = sum(face_areas)
+
+    return round(primary_area / total_area, 4) if total_area > 0 else 1.0
+
+
+def detect_faces(filepath: str) -> tuple[int, float, str, float]:
     """Detect faces using multi-scale short-range detection.
 
-    Tries detection on the original image first. If nothing is found,
-    progressively downscales the image so that distant/small faces become
-    large enough for the short-range model to detect.
+    Runs detection at all scales, merges overlapping detections, and
+    computes a subject isolation score based on face size distribution.
 
     Returns:
-        (face_count, face_area_ratio, face_distance)
+        (face_count, face_area_ratio, face_distance, subject_isolation)
         face_distance: "close" if original-scale model found faces,
                        "far" if only a downscaled pass found faces,
                        "none" if no faces found at any scale.
+        subject_isolation: 1.0 for clean compositions, < 1.0 when
+                          small background faces dilute the primary subject.
+                          0.0 when no faces found.
     """
     try:
         img = cv2.imread(filepath)
         if img is None:
             log.warning("Cannot read image for face detection: %s", filepath)
-            return 0, 0.0, "none"
+            return 0, 0.0, "none", 0.0
 
         h, w = img.shape[:2]
         if h == 0 or w == 0:
-            return 0, 0.0, "none"
+            return 0, 0.0, "none", 0.0
 
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         image_area = float(h * w)
         detector = _get_detector()
 
-        # Try original scale first (close-up faces)
+        # Detect at original scale (close-up faces)
         detections = _detect_at_scale(detector, rgb, 1.0)
+        face_distance = "close" if detections else "none"
+
         if detections:
-            face_count = len(detections)
-            total_face_area = sum(
-                d.bounding_box.width * d.bounding_box.height
-                for d in detections
-            )
-            return face_count, round(total_face_area / image_area, 4), "close"
+            # Also check downscaled versions for background bystanders
+            for scale in _DOWNSCALE_FACTORS:
+                if w * scale < 128 or h * scale < 128:
+                    continue
+                extra = _detect_at_scale(detector, rgb, scale)
+                if extra:
+                    detections = _merge_detections(detections, extra)
+        else:
+            # No close-up faces — try downscaled for distant subjects
+            for scale in _DOWNSCALE_FACTORS:
+                if w * scale < 128 or h * scale < 128:
+                    continue
+                detections = _detect_at_scale(detector, rgb, scale)
+                if detections:
+                    face_distance = "far"
+                    # Check even smaller scales for more background faces
+                    remaining = [s for s in _DOWNSCALE_FACTORS if s < scale]
+                    for s2 in remaining:
+                        if w * s2 < 128 or h * s2 < 128:
+                            continue
+                        extra = _detect_at_scale(detector, rgb, s2)
+                        if extra:
+                            detections = _merge_detections(detections, extra)
+                    break
 
-        # Try downscaled versions for distant faces
-        for scale in _DOWNSCALE_FACTORS:
-            # Skip if image is already small
-            if w * scale < 128 or h * scale < 128:
-                continue
+        if not detections:
+            return 0, 0.0, "none", 0.0
 
-            detections = _detect_at_scale(detector, rgb, scale)
-            if detections:
-                face_count = len(detections)
-                total_face_area = sum(
-                    d.bounding_box.width * d.bounding_box.height
-                    for d in detections
-                )
-                return face_count, round(total_face_area / image_area, 4), "far"
+        face_count = len(detections)
+        face_areas = [
+            d.bounding_box.width * d.bounding_box.height
+            for d in detections
+        ]
+        total_face_area = sum(face_areas)
+        isolation = _compute_isolation(face_areas)
 
-        return 0, 0.0, "none"
+        return (
+            face_count,
+            round(total_face_area / image_area, 4),
+            face_distance,
+            isolation,
+        )
 
     except Exception as e:
         log.warning("Face detection failed for %s: %s", filepath, e)
-        return 0, 0.0, "none"
+        return 0, 0.0, "none", 0.0
 
 
 def _get_landmarker():
@@ -209,15 +280,14 @@ def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float]:
     h, w = rgb.shape[:2]
     detector = _get_detector()
 
-    # Detect faces using multi-scale approach
+    # Detect faces using multi-scale approach with merging
     detections = _detect_at_scale(detector, rgb, 1.0)
-    if not detections:
-        for scale in _DOWNSCALE_FACTORS:
-            if w * scale < 128 or h * scale < 128:
-                continue
-            detections = _detect_at_scale(detector, rgb, scale)
-            if detections:
-                break
+    for scale in _DOWNSCALE_FACTORS:
+        if w * scale < 128 or h * scale < 128:
+            continue
+        extra = _detect_at_scale(detector, rgb, scale)
+        if extra:
+            detections = _merge_detections(detections, extra) if detections else extra
 
     if not detections:
         return 0.0, 0.0

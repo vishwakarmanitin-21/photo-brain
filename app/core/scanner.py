@@ -140,12 +140,13 @@ def detect_all_faces(
             return stats
 
         rep = group[0]
-        face_count, face_area_ratio, face_dist = detect_faces(rep.filepath)
+        face_count, face_area_ratio, face_dist, isolation = detect_faces(rep.filepath)
         fd = FaceDistance(face_dist)
         for p in group:
             p.face_count = face_count
             p.face_area_ratio = face_area_ratio
             p.face_distance = fd
+            p.subject_isolation = isolation
 
         n = len(group)
         if face_count > 0:

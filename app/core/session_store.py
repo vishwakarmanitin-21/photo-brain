@@ -12,7 +12,7 @@ from app.core.models import (
 
 log = logging.getLogger("photobrain.session_store")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS session (
@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS photos (
     face_distance TEXT DEFAULT 'none',
     eyes_open_score REAL DEFAULT 0.0,
     smile_score REAL DEFAULT 0.0,
+    subject_isolation REAL DEFAULT 0.0,
     exif_datetime TEXT,
     event_id TEXT,
     FOREIGN KEY (session_id) REFERENCES session(id)
@@ -143,6 +144,11 @@ MIGRATION_V4_TO_V5 = [
     "ALTER TABLE photos ADD COLUMN smile_score REAL DEFAULT 0.0",
 ]
 
+# Migration from v5 to v6: add subject isolation score
+MIGRATION_V5_TO_V6 = [
+    "ALTER TABLE photos ADD COLUMN subject_isolation REAL DEFAULT 0.0",
+]
+
 
 class SessionStore:
     def __init__(self, db_path: str):
@@ -205,6 +211,17 @@ class SessionStore:
         if version == 4:
             log.info("Migrating database from v4 to v5 (add expression scores)")
             for sql in MIGRATION_V4_TO_V5:
+                try:
+                    self._conn.execute(sql)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        log.warning("Migration statement failed: %s", e)
+            self._conn.commit()
+            version = 5
+
+        if version == 5:
+            log.info("Migrating database from v5 to v6 (add subject isolation)")
+            for sql in MIGRATION_V5_TO_V6:
                 try:
                     self._conn.execute(sql)
                 except sqlite3.OperationalError as e:
@@ -299,15 +316,16 @@ class SessionStore:
                     sha256, phash, sharpness, brightness, quality_score,
                     cluster_id, verdict, dup_type, user_override, thumb_path,
                     scan_order, face_count, face_area_ratio, face_distance,
-                    eyes_open_score, smile_score, exif_datetime, event_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    eyes_open_score, smile_score, subject_isolation,
+                    exif_datetime, event_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
                     (p.id, session_id, p.filepath, p.filename, p.file_size,
                      p.sha256, p.phash, p.sharpness, p.brightness, p.quality_score,
                      p.cluster_id, p.verdict.value, p.dup_type.value,
                      int(p.user_override), p.thumb_path, p.scan_order,
                      p.face_count, p.face_area_ratio, p.face_distance.value,
-                     p.eyes_open_score, p.smile_score,
+                     p.eyes_open_score, p.smile_score, p.subject_isolation,
                      p.exif_datetime, p.event_id)
                     for p in photos
                 ],
@@ -343,14 +361,14 @@ class SessionStore:
                    quality_score=?, cluster_id=?, verdict=?, dup_type=?,
                    user_override=?, thumb_path=?, face_count=?, face_area_ratio=?,
                    face_distance=?, eyes_open_score=?, smile_score=?,
-                   exif_datetime=?, event_id=?
+                   subject_isolation=?, exif_datetime=?, event_id=?
                    WHERE id=?""",
                 [
                     (p.sha256, p.phash, p.sharpness, p.brightness,
                      p.quality_score, p.cluster_id, p.verdict.value,
                      p.dup_type.value, int(p.user_override), p.thumb_path,
                      p.face_count, p.face_area_ratio, p.face_distance.value,
-                     p.eyes_open_score, p.smile_score,
+                     p.eyes_open_score, p.smile_score, p.subject_isolation,
                      p.exif_datetime, p.event_id, p.id)
                     for p in photos
                 ],
@@ -509,6 +527,7 @@ class SessionStore:
             face_distance=FaceDistance(row["face_distance"]) if row["face_distance"] else FaceDistance.NONE,
             eyes_open_score=row["eyes_open_score"] or 0.0,
             smile_score=row["smile_score"] or 0.0,
+            subject_isolation=row["subject_isolation"] or 0.0,
             exif_datetime=row["exif_datetime"],
             event_id=row["event_id"],
         )

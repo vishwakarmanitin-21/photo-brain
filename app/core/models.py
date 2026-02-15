@@ -53,6 +53,7 @@ class Photo:
     face_distance: FaceDistance = FaceDistance.NONE
     eyes_open_score: float = 0.0
     smile_score: float = 0.0
+    subject_isolation: float = 0.0
     exif_datetime: Optional[str] = None
     event_id: Optional[str] = None
 

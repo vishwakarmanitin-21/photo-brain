@@ -12,7 +12,7 @@ PhotoBrain Desktop is a local-first Windows GUI application for cleaning and org
 - **Similarity:** imagehash (pHash + Hamming distance)
 - **Face detection:** mediapipe (Tasks API — `mp.tasks.vision.FaceDetector` + `FaceLandmarker`)
 - **File deletion:** send2trash (cross-platform Recycle Bin)
-- **Persistence:** SQLite (stdlib) with WAL mode, schema version 5
+- **Persistence:** SQLite (stdlib) with WAL mode, schema version 6
 - **Packaging:** pip + requirements.txt + venv
 
 ## Architecture
@@ -26,12 +26,12 @@ app/
     models.py                 # Dataclasses: Photo, Cluster, Event, SessionState + enums
     hashing.py                # SHA256 (exact dup) + pHash (near dup)
     clustering.py             # Union-Find clustering by hash similarity
-    scoring.py                # Laplacian sharpness + brightness + face/expression bonus → quality score
+    scoring.py                # Laplacian sharpness + brightness + face/expression/isolation → quality score
     scanner.py                # Pipeline orchestrator (collect → hash → cluster → score → faces → expressions → events → suggest)
     faces.py                  # Face detection (multi-scale) + expression analysis via mediapipe Tasks API
     events.py                 # EXIF date/time extraction + time-proximity event grouping
     thumbnails.py             # 200x200 JPEG cache in .photobrain/thumbs/
-    session_store.py          # SQLite CRUD with WAL, batch inserts, schema migrations (v1→v5)
+    session_store.py          # SQLite CRUD with WAL, batch inserts, schema migrations (v1→v6)
     file_ops.py               # Safe file moves, Recycle Bin delete, collision handling, CSV/JSON logs, undo
   ui/                         # PySide6 widgets — no processing logic
     main_window.py            # QStackedWidget (Setup→Scan→Review), owns workers + store
@@ -56,7 +56,7 @@ app/
 - **Batch inserts** via `executemany` for 5000+ photo performance
 - **Union-Find** with path compression for deterministic clustering
 - **Three-verdict system:** KEEP (safe move), ARCHIVE (safe move to archive), DELETE (Recycle Bin via send2trash)
-- **Schema migrations** via `PRAGMA user_version` — v1→v2 adds face/event columns, v2→v3 converts old DELETE→ARCHIVE, v3→v4 adds face_distance, v4→v5 adds expression scores
+- **Schema migrations** via `PRAGMA user_version` — v1→v2 adds face/event columns, v2→v3 converts old DELETE→ARCHIVE, v3→v4 adds face_distance, v4→v5 adds expression scores, v5→v6 adds subject_isolation
 
 ## Data Flow
 
@@ -108,7 +108,7 @@ venv\Scripts\python run.py
 - Double-click thumbnail to open photo in default viewer
 - Scan summary with "Continue to Review" button
 - Keyboard shortcuts: K (Keep), A (Archive), D (Delete), R (Review)
-- Thumbnail tooltips show Eyes Open % and Smile % for photos with faces
+- Thumbnail tooltips show Eyes Open %, Smile %, and Isolation % for photos with faces
 - Supports JPEG + PNG only
 - pHash clustering is O(n^2) — fine for ~5000 photos
 
@@ -116,7 +116,8 @@ venv\Scripts\python run.py
 
 - **mediapipe API:** Uses `mp.tasks.vision.FaceDetector` (Tasks API), NOT the deprecated `mp.solutions` API. Multi-scale detection using `blaze_face_short_range.tflite`: runs on original image first (close-up faces), then on progressively downscaled versions (50%, 25%) to catch distant/small faces. Models auto-download to temp dir on first use. Expression analysis uses `FaceLandmarker` (`face_landmarker.task`) for blendshape-based eyes-open and smile scoring (works on close-up faces; distant faces get detection but not expressions).
 - **QDialog.Accepted:** Always use `QDialog.Accepted` (class-level), never `dialog.Accepted` (instance-level) — PySide6 doesn't expose it on instances.
-- **Quality score formula:** `0.50 * log(sharpness+1) + 0.15 * (brightness/255) + 0.10 * min(face_count, 3) + 0.15 * eyes_open_score + 0.10 * smile_score`
+- **Quality score formula:** `0.48 * log(sharpness+1) + 0.14 * (brightness/255) + 0.10 * min(face_count, 3) + 0.13 * eyes_open_score + 0.10 * smile_score + 0.05 * subject_isolation`
+- **Subject isolation:** Measures composition cleanliness (1.0 = clean portrait/uniform group, < 1.0 = background bystanders). Computed via multi-scale face detection + IoU merge. Faces < 25% of the largest face area are classified as background noise.
 
 ## Conventions
 

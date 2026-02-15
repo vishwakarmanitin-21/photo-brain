@@ -40,13 +40,15 @@ def compute_quality_score(
     face_count: int = 0,
     eyes_open_score: float = 0.0,
     smile_score: float = 0.0,
+    subject_isolation: float = 0.0,
 ) -> float:
     return (
-        0.50 * math.log(sharpness + 1)
-        + 0.15 * (brightness / 255.0)
+        0.48 * math.log(sharpness + 1)
+        + 0.14 * (brightness / 255.0)
         + 0.10 * min(face_count, 3)
-        + 0.15 * eyes_open_score
+        + 0.13 * eyes_open_score
         + 0.10 * smile_score
+        + 0.05 * subject_isolation
     )
 
 
@@ -63,10 +65,10 @@ def score_photo(filepath: str) -> tuple[float, float, float]:
 
 
 def rescore_with_faces(photo: "Photo") -> float:
-    """Recalculate quality score incorporating face count and expressions."""
+    """Recalculate quality score incorporating face count, expressions, and isolation."""
     return compute_quality_score(
         photo.sharpness, photo.brightness, photo.face_count,
-        photo.eyes_open_score, photo.smile_score,
+        photo.eyes_open_score, photo.smile_score, photo.subject_isolation,
     )
 
 
