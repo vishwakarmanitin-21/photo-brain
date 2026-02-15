@@ -1,15 +1,19 @@
 # PhotoBrain Desktop
 
-A local-first Windows desktop application for cleaning and organizing large batches of personal photos. PhotoBrain scans your photo folders, detects duplicates, scores image quality, and helps you decide what to keep — all without uploading anything to the cloud.
+A local-first Windows desktop application for cleaning and organizing large batches of personal photos. PhotoBrain scans your photo folders, detects duplicates, scores image quality, detects faces, groups photos into events, and helps you decide what to keep — all without uploading anything to the cloud.
 
 ## Features
 
 - **Duplicate Detection** — finds exact duplicates (SHA256) and near-duplicates (perceptual hash)
-- **Quality Scoring** — ranks photos by sharpness (Laplacian variance) and brightness
+- **Quality Scoring** — ranks photos by sharpness, brightness, face presence, expressions, and composition
+- **Face Detection** — multi-scale face detection catches both close-up and distant faces
+- **Expression Analysis** — scores eyes-open and smile via Face Landmarker blendshapes
+- **Subject Isolation** — penalizes photos with random background bystanders (group photos are not penalized)
+- **Event Grouping** — groups photos into time-based events using EXIF date/time
 - **Smart Suggestions** — automatically suggests which photos to keep and which to archive
 - **Visual Review** — browse clusters of similar photos with color-coded thumbnails
-- **Keyboard-Driven** — fast review workflow with single-key shortcuts
-- **Safe File Operations** — never permanently deletes; moves files to organized archive folders
+- **Keyboard-Driven** — fast review workflow with single-key shortcuts (K/A/D/R)
+- **Three Verdicts** — KEEP (organized folder), ARCHIVE (safe move), DELETE (Recycle Bin)
 - **Full Undo** — reverse the last apply operation with one click
 - **Session Persistence** — close the app and resume your review session later
 - **Performance** — handles 5,000+ photos without freezing the UI (background workers)
@@ -47,6 +51,24 @@ Or with the virtual environment activated:
 python run.py
 ```
 
+## Building a Standalone Executable
+
+Create a distributable package that runs without Python installed:
+
+```bash
+# Install PyInstaller (one-time)
+venv\Scripts\pip install pyinstaller
+
+# Build the application
+venv\Scripts\python scripts\build.py
+```
+
+This produces:
+- `dist/PhotoBrain/` — folder with `PhotoBrain.exe` and all dependencies
+- `dist/PhotoBrain.zip` — zip archive (~120 MB) ready to share
+
+**To distribute:** Send the zip file to users. They extract it and run `PhotoBrain/PhotoBrain.exe` — no Python installation required. The mediapipe face detection models are downloaded automatically on first use (~5 MB).
+
 ## How It Works
 
 ### 1. Select a Folder
@@ -55,46 +77,54 @@ Choose a folder containing your photos (JPEG, PNG). PhotoBrain scans recursively
 
 ### 2. Scan
 
-The scan pipeline runs in the background:
+The scan pipeline runs in the background with live progress:
 
 1. **Collect** — finds all `.jpg`, `.jpeg`, `.png` files
 2. **Hash** — computes SHA256 for exact duplicate detection
 3. **Perceptual Hash** — computes pHash for near-duplicate detection
 4. **Score** — measures sharpness and brightness for each photo
-5. **Cluster** — groups similar photos using Union-Find on hash similarity
-6. **Suggest** — marks the best N photos per cluster as KEEP, rest as DELETE
+5. **Face Detection** — multi-scale detection (original + downscaled) for close-up and distant faces
+6. **Expression Analysis** — eyes-open and smile scoring for photos with faces
+7. **EXIF Events** — groups photos by time proximity using EXIF timestamps
+8. **Cluster** — groups similar photos using Union-Find on hash similarity
+9. **Suggest** — marks the best N photos per cluster as KEEP, rest as ARCHIVE
+
+The scan summary shows detailed statistics including face distance breakdown (close-up, distant, no faces, group shots) and expression analysis count.
 
 ### 3. Review
 
 Browse clusters of similar photos in a visual grid:
 
-- **Green border** = suggested KEEP
-- **Red border** = suggested DELETE
-- **Gray border** = undecided
+- **Green border** = KEEP
+- **Orange border** = ARCHIVE
+- **Red border** = DELETE
+- **Gray border** = undecided (REVIEW)
 
-Override any suggestion with keyboard shortcuts or mouse clicks.
+Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, and isolation %. Filter by face distance, events, or group shots.
 
 ### 4. Apply
 
-When satisfied with your decisions, apply the changes. Photos are moved (not deleted) to organized folders:
+When satisfied with your decisions, apply the changes:
 
 | Decision | Destination |
 |----------|-------------|
 | KEEP | `03_KEEP/` |
-| DELETE (exact duplicate) | `04_ARCHIVE_DUPES/` |
-| DELETE (low quality / near-dup) | `05_ARCHIVE_LOW_QUALITY/` |
+| ARCHIVE (exact duplicate) | `04_ARCHIVE_DUPES/` |
+| ARCHIVE (low quality / near-dup) | `05_ARCHIVE_LOW_QUALITY/` |
+| DELETE | Recycle Bin (via send2trash) |
 
 A detailed log (CSV + JSON) is written for every apply operation.
 
 ### 5. Undo
 
-Changed your mind? Click "Undo Last Apply" to restore all files to their original locations.
+Changed your mind? Click "Undo Last Apply" to restore all moved files to their original locations. (Recycle Bin deletes cannot be undone from the app.)
 
 ## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
 | `K` | Mark selected photo as KEEP |
+| `A` | Mark selected photo as ARCHIVE |
 | `D` | Mark selected photo as DELETE |
 | `R` | Reset selected photo to undecided |
 | `J` / `Down` | Next cluster |
@@ -111,29 +141,58 @@ Accessible from the home screen:
 |---------|---------|-------------|
 | pHash Threshold | 8 | Hamming distance threshold for near-duplicate matching. Lower = stricter. |
 | Keep per Cluster | 2 | Number of best photos to suggest keeping per cluster. |
+| Event Gap (hours) | 4.0 | Time gap between EXIF timestamps to split into separate events. |
+| Face Detection | On | Enable/disable face detection and expression analysis. |
+
+## Quality Score Formula
+
+```
+score = 0.48 * log(sharpness + 1)
+      + 0.14 * (brightness / 255)
+      + 0.10 * min(face_count, 3)
+      + 0.13 * eyes_open_score
+      + 0.10 * smile_score
+      + 0.05 * subject_isolation
+```
+
+| Component | Weight | Description |
+|-----------|--------|-------------|
+| **Sharpness** | 48% | Variance of the Laplacian (measures edge contrast / focus). Log-compressed. |
+| **Brightness** | 14% | Mean pixel luminance normalized to [0, 1]. |
+| **Face count** | 10% | Number of detected faces, capped at 3. |
+| **Eyes open** | 13% | Average eyes-open score across faces (0 = closed, 1 = open). |
+| **Smile** | 10% | Average smile score across faces (0 = neutral, 1 = smiling). |
+| **Subject isolation** | 5% | Composition cleanliness — 1.0 for clean portraits and uniform groups, < 1.0 when small background bystanders are detected. |
+
+Photos without faces compete on sharpness and brightness only (face/expression/isolation terms are 0).
 
 ## Project Structure
 
 ```
 photo-brain/
-  requirements.txt              # PySide6, opencv-python, Pillow, imagehash
+  requirements.txt              # PySide6, opencv-python, Pillow, imagehash, mediapipe, send2trash
   run.py                        # Entry point
+  assets/
+    photobrain.ico              # Application icon
+    photobrain_256.png          # 256x256 icon image
   app/
     main.py                     # QApplication bootstrap
     core/
-      models.py                 # Data models (Photo, Cluster, SessionState)
+      models.py                 # Data models (Photo, Cluster, Event, SessionState + enums)
       hashing.py                # SHA256 + perceptual hash computation
       clustering.py             # Union-Find clustering algorithm
-      scoring.py                # Image quality scoring
+      scoring.py                # Image quality scoring (sharpness + brightness + faces + isolation)
       scanner.py                # Scan pipeline orchestrator
+      faces.py                  # Multi-scale face detection + expression analysis (mediapipe)
+      events.py                 # EXIF date/time extraction + event grouping
       thumbnails.py             # Thumbnail cache management
-      session_store.py          # SQLite persistence layer
+      session_store.py          # SQLite persistence layer (schema v6)
       file_ops.py               # File move operations + undo
     ui/
       main_window.py            # Main window with screen navigation
       setup_view.py             # Home screen / folder selection
-      scan_view.py              # Scan progress screen
-      review_view.py            # Photo review screen
+      scan_view.py              # Scan progress screen with live stats
+      review_view.py            # Photo review screen with filters
       dialogs.py                # Settings, confirmation, and result dialogs
     workers/
       scan_worker.py            # Background scan thread
@@ -143,17 +202,6 @@ photo-brain/
       logging_util.py           # Logging configuration
 ```
 
-## Quality Score Formula
-
-```
-score = 0.75 * log(sharpness + 1) + 0.25 * (brightness / 255)
-```
-
-- **Sharpness**: variance of the Laplacian (measures edge contrast / focus)
-- **Brightness**: mean pixel luminance (0-255)
-- The log compresses the large range of sharpness values into a manageable scale
-- Sharpness is weighted 3x more than brightness
-
 ## Data Storage
 
 PhotoBrain stores all session data locally in a `.photobrain` folder inside your selected source folder:
@@ -161,7 +209,7 @@ PhotoBrain stores all session data locally in a `.photobrain` folder inside your
 ```
 your-photos/
   .photobrain/
-    session.db          # SQLite database (session state, photo metadata, clusters)
+    session.db          # SQLite database (session state, photo metadata, clusters, events)
     thumbs/             # Cached 200x200 thumbnails
     logs/               # Apply operation logs (CSV + JSON)
   03_KEEP/              # Output: kept photos
@@ -180,8 +228,8 @@ your-photos/
 - **Single undo level** — only the most recent apply operation can be undone
 - **No HEIC or RAW support** — only JPEG and PNG in the current version
 - **Flat output structure** — files moved to output folders do not preserve their original subdirectory hierarchy
-- **Assisted mode only** — all suggestions must be reviewed before applying (no auto-apply mode yet)
-- **No EXIF metadata analysis** — does not use date, camera model, or GPS data for grouping
+- **Expression analysis on close-up faces only** — distant faces are detected but too small for reliable blendshape extraction
+- **Windows only** — built and tested for Windows 10/11
 
 ## License
 
