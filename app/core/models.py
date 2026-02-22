@@ -70,6 +70,7 @@ class Cluster:
     delete_count: int = 0
     is_exact_dup_group: bool = False
     reviewed: bool = False
+    applied: bool = False
 
 
 @dataclass

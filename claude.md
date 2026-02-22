@@ -105,10 +105,13 @@ venv\Scripts\python run.py
 - Scan summary with face distance breakdown (close-up, distant, no faces, group shots, expressions analyzed)
 - Three verdicts: KEEP, ARCHIVE (safe move), DELETE (Recycle Bin)
 - Per-photo buttons (Keep/Archive/Delete) + cluster-level (Keep All/Archive All/Delete All)
+- **Per-cluster apply:** "Apply Cluster" button applies changes for current cluster only, marks it as [APPLIED], and auto-navigates to next cluster
+- **Global apply skips applied clusters:** "Apply Changes" processes only unapplied clusters
+- **Undo:** Reverses last apply operation (cluster or global)
 - Double-click thumbnail to open photo in default viewer
 - Scan summary with "Continue to Review" button
 - Keyboard shortcuts: K (Keep), A (Archive), D (Delete), R (Review), +/- (Zoom), 0 (Reset zoom)
-- Thumbnail zoom: 1x/2x/3x/4x with dynamic grid reflow (4→3→2→1 columns)
+- Thumbnail zoom: 1x/2x/3x/4x/5x/6x/7x/8x with dynamic grid reflow (4→3→2→1 columns)
 - Hover preview: Alt+hover shows full-size photo in floating overlay
 - Thumbnail tooltips show Eyes Open %, Smile %, Isolation %, Expression %, and Frontal % for photos with faces
 - Supports JPEG + PNG only
@@ -118,6 +121,7 @@ venv\Scripts\python run.py
 
 - **mediapipe API:** Uses `mp.tasks.vision.FaceDetector` (Tasks API), NOT the deprecated `mp.solutions` API. Multi-scale detection using `blaze_face_short_range.tflite`: runs on original image first (close-up faces), then on progressively downscaled versions (50%, 25%) to catch distant/small faces. Models auto-download to temp dir on first use. Expression analysis uses `FaceLandmarker` (`face_landmarker.task`) for blendshape-based eyes-open and smile scoring (works on close-up faces; distant faces get detection but not expressions).
 - **QDialog.Accepted:** Always use `QDialog.Accepted` (class-level), never `dialog.Accepted` (instance-level) — PySide6 doesn't expose it on instances.
+- **Database schema version:** Current version is 8 (v7→v8 adds `applied` column to clusters table for per-cluster apply tracking)
 - **Quality score formula:** `0.45 * log(sharpness+1) + 0.13 * (brightness/255) + 0.10 * min(face_count, 3) + 0.12 * eyes_open_score + 0.09 * smile_score + 0.05 * subject_isolation + 0.04 * expression_naturalness + 0.02 * head_pose_frontal`
 - **Subject isolation:** Measures composition cleanliness (1.0 = clean portrait/uniform group, < 1.0 = background bystanders). Computed via multi-scale face detection + IoU merge. Faces < 25% of the largest face area are classified as background noise.
 - **Expression naturalness:** Penalizes awkward/unflattering expressions (squinting, frowning, mid-speech, jaw tension) using mediapipe blendshapes. 1.0 = natural/relaxed, lower = awkward.

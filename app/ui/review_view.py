@@ -217,23 +217,32 @@ class ThumbnailWidget(QFrame):
         self.verdict_changed.emit(self.photo.id, verdict.value)
 
     def set_pixmap(self, pixmap: QPixmap, display_size: int = None):
-        """Set pixmap scaled to display_size."""
+        """Set pixmap scaled to display_size, adjusting for aspect ratio."""
         if display_size is None:
             display_size = self._display_size
 
+        # Scale maintaining aspect ratio
         scaled = pixmap.scaled(
             display_size, display_size,
             Qt.KeepAspectRatio, Qt.SmoothTransformation,
         )
+
+        # Set the image label to the actual scaled size (not square)
+        actual_width = scaled.width()
+        actual_height = scaled.height()
+        self._image_label.setFixedSize(actual_width, actual_height)
         self._image_label.setPixmap(scaled)
-        self._image_label.setFixedSize(display_size, display_size)
         self._image_label.setText("")
+
+        # Adjust widget height to match actual image height + UI chrome
+        # UI chrome = 8px margins + labels + buttons + verdict ≈ 116px
+        self.setFixedSize(display_size + 16, actual_height + 116)
 
     def update_size(self, display_size: int):
         """Resize widget to accommodate new display size."""
         self._display_size = display_size
-        # Widget width = display_size + 16px padding
-        # Widget height = display_size + 116px UI chrome (was 100px + 16px padding)
+        # Set maximum dimensions - actual size will be set when pixmap is loaded
+        # This ensures the widget doesn't take up too much space initially
         self.setFixedSize(display_size + 16, display_size + 116)
         self._image_label.setFixedSize(display_size, display_size)
 
@@ -302,6 +311,7 @@ class ReviewView(QWidget):
     """Main review interface with cluster list and thumbnail grid."""
 
     apply_requested = Signal()
+    apply_cluster_requested = Signal(str)  # cluster_id
     undo_requested = Signal()
     back_requested = Signal()
 
@@ -497,6 +507,18 @@ class ReviewView(QWidget):
         btn_mark_reviewed = QPushButton("Mark Reviewed")
         btn_mark_reviewed.clicked.connect(self._mark_reviewed)
         actions.addWidget(btn_mark_reviewed)
+
+        actions.addSpacing(15)
+
+        btn_apply_cluster = QPushButton("Apply Cluster")
+        btn_apply_cluster.setToolTip("Apply changes for this cluster only (move/delete files)")
+        btn_apply_cluster.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; "
+            "padding: 4px 12px; border-radius: 3px; font-weight: bold; }"
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        btn_apply_cluster.clicked.connect(self._apply_cluster)
+        actions.addWidget(btn_apply_cluster)
 
         actions.addStretch()
         layout.addLayout(actions)
@@ -811,6 +833,8 @@ class ReviewView(QWidget):
                 flags = " [EXACT]"
             if c.reviewed:
                 flags += " [OK]"
+            if c.applied:
+                flags += " [APPLIED]"
             text = f"{c.label} ({c.member_count}){flags}"
             self._cluster_list.addItem(QListWidgetItem(text))
         self._cluster_list.blockSignals(False)
@@ -964,6 +988,21 @@ class ReviewView(QWidget):
             self._update_cluster_list_item()
             self._next_cluster()
 
+    def _apply_cluster(self):
+        """Apply changes for the current cluster only."""
+        if 0 <= self._current_cluster_idx < len(self._clusters):
+            cluster = self._clusters[self._current_cluster_idx]
+            self.apply_cluster_requested.emit(cluster.id)
+
+    def mark_cluster_applied(self, cluster_id: str):
+        """Mark a cluster as applied and navigate to next cluster."""
+        for cluster in self._all_clusters:
+            if cluster.id == cluster_id:
+                cluster.applied = True
+                break
+        self._update_cluster_list_item()
+        self._next_cluster()
+
     # ── Navigation ───────────────────────────────────────
 
     def _next_cluster(self):
@@ -1019,6 +1058,8 @@ class ReviewView(QWidget):
                 flags = " [EXACT]"
             if cluster.reviewed:
                 flags += " [OK]"
+            if cluster.applied:
+                flags += " [APPLIED]"
             text = f"{cluster.label} ({cluster.member_count}){flags}"
 
             item = self._cluster_list.item(self._current_cluster_idx)

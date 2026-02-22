@@ -12,7 +12,7 @@ from app.core.models import (
 
 log = logging.getLogger("photobrain.session_store")
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS session (
@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS clusters (
     delete_count INTEGER DEFAULT 0,
     is_exact_dup_group INTEGER DEFAULT 0,
     reviewed INTEGER DEFAULT 0,
+    applied INTEGER DEFAULT 0,
     FOREIGN KEY (session_id) REFERENCES session(id)
 );
 
@@ -157,6 +158,11 @@ MIGRATION_V6_TO_V7 = [
     "ALTER TABLE photos ADD COLUMN head_pose_frontal REAL DEFAULT 0.0",
 ]
 
+# Migration from v7 to v8: add applied flag to clusters
+MIGRATION_V7_TO_V8 = [
+    "ALTER TABLE clusters ADD COLUMN applied INTEGER DEFAULT 0",
+]
+
 
 class SessionStore:
     def __init__(self, db_path: str):
@@ -241,6 +247,17 @@ class SessionStore:
         if version == 6:
             log.info("Migrating database from v6 to v7 (add expression naturalness, head pose)")
             for sql in MIGRATION_V6_TO_V7:
+                try:
+                    self._conn.execute(sql)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        log.warning("Migration statement failed: %s", e)
+            self._conn.commit()
+            version = 7
+
+        if version == 7:
+            log.info("Migrating database from v7 to v8 (add applied flag to clusters)")
+            for sql in MIGRATION_V7_TO_V8:
                 try:
                     self._conn.execute(sql)
                 except sqlite3.OperationalError as e:
@@ -405,12 +422,12 @@ class SessionStore:
                 """INSERT OR REPLACE INTO clusters
                    (id, session_id, label, representative_photo_id,
                     member_count, keep_count, delete_count,
-                    is_exact_dup_group, reviewed)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                    is_exact_dup_group, reviewed, applied)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 [
                     (c.id, session_id, c.label, c.representative_photo_id,
                      c.member_count, c.keep_count, c.delete_count,
-                     int(c.is_exact_dup_group), int(c.reviewed))
+                     int(c.is_exact_dup_group), int(c.reviewed), int(c.applied))
                     for c in clusters
                 ],
             )
@@ -433,6 +450,13 @@ class SessionStore:
         self._conn.execute(
             "UPDATE clusters SET reviewed=? WHERE id=?",
             (int(reviewed), cluster_id),
+        )
+        self._conn.commit()
+
+    def update_cluster_applied(self, cluster_id: str, applied: bool):
+        self._conn.execute(
+            "UPDATE clusters SET applied=? WHERE id=?",
+            (int(applied), cluster_id),
         )
         self._conn.commit()
 
@@ -559,6 +583,12 @@ class SessionStore:
 
     @staticmethod
     def _row_to_cluster(row: sqlite3.Row) -> Cluster:
+        # Handle optional 'applied' column for backward compatibility
+        try:
+            applied = bool(row["applied"])
+        except (KeyError, IndexError):
+            applied = False
+
         return Cluster(
             id=row["id"],
             label=row["label"],
@@ -568,6 +598,7 @@ class SessionStore:
             delete_count=row["delete_count"],
             is_exact_dup_group=bool(row["is_exact_dup_group"]),
             reviewed=bool(row["reviewed"]),
+            applied=applied,
         )
 
     @staticmethod

@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self.scan_view.cancel_requested.connect(self._cancel_scan)
         self.scan_view.continue_requested.connect(self._on_continue_to_review)
         self.review_view.apply_requested.connect(self._on_apply)
+        self.review_view.apply_cluster_requested.connect(self._on_apply_cluster)
         self.review_view.undo_requested.connect(self._on_undo)
         self.review_view.back_requested.connect(self._go_home)
 
@@ -143,7 +144,11 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_continue_to_review(self):
         log.info("User continuing to review")
-        self._load_review()
+        try:
+            self._load_review()
+        except Exception as e:
+            log.exception("Failed to load review")
+            QMessageBox.critical(self, "Error Loading Review", f"Failed to load review: {str(e)}")
 
     @Slot(str)
     def _on_scan_error(self, msg: str):
@@ -231,7 +236,85 @@ class MainWindow(QMainWindow):
         if all_photos:
             self.store.update_photos_batch(all_photos)
 
-        photos = self.store.get_photos_by_session(self.session_id)
+        # Get all clusters and filter out already-applied ones
+        all_clusters = self.store.get_clusters_by_session(self.session_id)
+        applied_cluster_ids = {c.id for c in all_clusters if c.applied}
+
+        # Get photos from unapplied clusters only
+        all_session_photos = self.store.get_photos_by_session(self.session_id)
+        photos = [p for p in all_session_photos if p.cluster_id not in applied_cluster_ids]
+
+        keep_count = sum(1 for p in photos if p.verdict == Verdict.KEEP)
+        archive_count = sum(1 for p in photos if p.verdict == Verdict.ARCHIVE)
+        delete_count = sum(1 for p in photos if p.verdict == Verdict.DELETE)
+        review_count = sum(1 for p in photos if p.verdict == Verdict.REVIEW)
+
+        if archive_count == 0 and delete_count == 0 and keep_count == 0:
+            if applied_cluster_ids:
+                QMessageBox.information(
+                    self, "Nothing to Apply",
+                    "All remaining clusters have either been applied or have no KEEP/ARCHIVE/DELETE verdicts.",
+                )
+            else:
+                QMessageBox.information(
+                    self, "Nothing to Apply",
+                    "No photos have been marked as KEEP, ARCHIVE, or DELETE.",
+                )
+            return
+
+        # Show how many clusters will be processed
+        unapplied_clusters = [c for c in all_clusters if not c.applied]
+        dialog = ApplyConfirmDialog(
+            keep_count, archive_count, delete_count, review_count, self
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        # Execute apply for unapplied clusters
+        try:
+            operator = FileOperator(self.source_folder, self.store, self.session_id)
+            processed, errors = operator.apply_verdicts(photos)
+
+            # Mark all unapplied clusters as applied
+            for cluster in unapplied_clusters:
+                self.store.update_cluster_applied(cluster.id, True)
+
+            self.store.update_session_status(self.session_id, SessionStatus.APPLIED)
+
+            msg = f"Processed {processed} files successfully."
+            if errors:
+                msg += f"\n{errors} files had errors (see log)."
+            if applied_cluster_ids:
+                msg += f"\n\nSkipped {len(applied_cluster_ids)} already-applied clusters."
+            QMessageBox.information(self, "Apply Complete", msg)
+
+            # Reload review with undo available
+            self._load_review()
+
+        except Exception as e:
+            log.exception("Apply failed")
+            QMessageBox.critical(self, "Apply Failed", str(e))
+
+    @Slot(str)
+    def _on_apply_cluster(self, cluster_id: str):
+        """Apply changes for a single cluster."""
+        if not self.store:
+            return
+
+        # Get cluster photos
+        cluster_photos = {}
+        for cid, photos in self.review_view._cluster_photos.items():
+            cluster_photos[cid] = photos
+
+        photos = cluster_photos.get(cluster_id, [])
+        if not photos:
+            QMessageBox.warning(self, "No Photos", "No photos found in this cluster.")
+            return
+
+        # Persist verdicts for this cluster's photos
+        self.store.update_photos_batch(photos)
+
+        # Count verdicts for this cluster only
         keep_count = sum(1 for p in photos if p.verdict == Verdict.KEEP)
         archive_count = sum(1 for p in photos if p.verdict == Verdict.ARCHIVE)
         delete_count = sum(1 for p in photos if p.verdict == Verdict.DELETE)
@@ -240,7 +323,7 @@ class MainWindow(QMainWindow):
         if archive_count == 0 and delete_count == 0 and keep_count == 0:
             QMessageBox.information(
                 self, "Nothing to Apply",
-                "No photos have been marked as KEEP, ARCHIVE, or DELETE.",
+                "No photos in this cluster have been marked as KEEP, ARCHIVE, or DELETE.",
             )
             return
 
@@ -250,22 +333,24 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        # Execute apply
+        # Execute apply for this cluster only
         try:
             operator = FileOperator(self.source_folder, self.store, self.session_id)
             processed, errors = operator.apply_verdicts(photos)
-            self.store.update_session_status(self.session_id, SessionStatus.APPLIED)
 
-            msg = f"Processed {processed} files successfully."
+            # Mark cluster as applied in database
+            self.store.update_cluster_applied(cluster_id, True)
+
+            msg = f"Processed {processed} files in this cluster successfully."
             if errors:
                 msg += f"\n{errors} files had errors (see log)."
             QMessageBox.information(self, "Apply Complete", msg)
 
-            # Reload review with undo available
-            self._load_review()
+            # Mark cluster as applied in UI and navigate to next
+            self.review_view.mark_cluster_applied(cluster_id)
 
         except Exception as e:
-            log.exception("Apply failed")
+            log.exception("Cluster apply failed")
             QMessageBox.critical(self, "Apply Failed", str(e))
 
     # ── Undo ─────────────────────────────────────────────
