@@ -5,7 +5,7 @@ import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget,
     QListWidgetItem, QScrollArea, QGridLayout, QLabel, QFrame,
-    QPushButton, QSizePolicy, QComboBox, QApplication,
+    QPushButton, QSizePolicy, QComboBox, QApplication, QSlider,
 )
 from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint
 from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor
@@ -15,10 +15,10 @@ from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistanc
 log = logging.getLogger("photobrain.review_view")
 
 # Zoom configuration
-ZOOM_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8]
-BASE_THUMB_SIZE = 180  # Base display size at 1x zoom
+MIN_THUMB_SIZE = 120  # Minimum thumbnail size
+MAX_THUMB_SIZE = 800  # Maximum thumbnail size
+BASE_THUMB_SIZE = 180  # Base display size (middle of range)
 THUMB_DISPLAY_SIZE = 180  # Keep for backward compatibility
-GRID_COLUMNS = 4  # Default at 1x zoom
 
 # Colors
 COLOR_KEEP = "#4CAF50"
@@ -326,7 +326,7 @@ class ReviewView(QWidget):
         self._current_cluster_idx = -1
         self._selected_photo_id: str | None = None
         self._current_photos: list[Photo] = []  # Current cluster photos
-        self._zoom_level = 1  # Current zoom level (1x/2x/3x/4x)
+        self._current_display_size = BASE_THUMB_SIZE  # Current thumbnail display size
         self._build_ui()
         self._bind_shortcuts()
 
@@ -350,38 +350,40 @@ class ReviewView(QWidget):
         self._undo_btn.clicked.connect(self.undo_requested.emit)
         toolbar.addWidget(self._undo_btn)
 
-        # Zoom controls
+        # Zoom controls - smooth slider
         zoom_layout = QHBoxLayout()
         zoom_layout.addWidget(QLabel("Zoom:"))
 
-        self._zoom_1x_btn = QPushButton("1x")
-        self._zoom_2x_btn = QPushButton("2x")
-        self._zoom_3x_btn = QPushButton("3x")
-        self._zoom_4x_btn = QPushButton("4x")
-        self._zoom_5x_btn = QPushButton("5x")
-        self._zoom_6x_btn = QPushButton("6x")
-        self._zoom_7x_btn = QPushButton("7x")
-        self._zoom_8x_btn = QPushButton("8x")
+        # Zoom out button
+        zoom_out_btn = QPushButton("-")
+        zoom_out_btn.setFixedWidth(30)
+        zoom_out_btn.setToolTip("Zoom out (smaller thumbnails)")
+        zoom_out_btn.clicked.connect(self._zoom_out)
+        zoom_layout.addWidget(zoom_out_btn)
 
-        for btn in [self._zoom_1x_btn, self._zoom_2x_btn,
-                    self._zoom_3x_btn, self._zoom_4x_btn,
-                    self._zoom_5x_btn, self._zoom_6x_btn,
-                    self._zoom_7x_btn, self._zoom_8x_btn]:
-            btn.setCheckable(True)
-            btn.setFixedWidth(40)
-            zoom_layout.addWidget(btn)
+        # Smooth zoom slider
+        self._zoom_slider = QSlider(Qt.Horizontal)
+        self._zoom_slider.setMinimum(MIN_THUMB_SIZE)
+        self._zoom_slider.setMaximum(MAX_THUMB_SIZE)
+        self._zoom_slider.setValue(BASE_THUMB_SIZE)
+        self._zoom_slider.setFixedWidth(150)
+        self._zoom_slider.setToolTip(f"Thumbnail size: {BASE_THUMB_SIZE}px")
+        self._zoom_slider.valueChanged.connect(self._on_zoom_changed)
+        zoom_layout.addWidget(self._zoom_slider)
 
-        self._zoom_1x_btn.setChecked(True)  # Default 1x
+        # Zoom in button
+        zoom_in_btn = QPushButton("+")
+        zoom_in_btn.setFixedWidth(30)
+        zoom_in_btn.setToolTip("Zoom in (larger thumbnails)")
+        zoom_in_btn.clicked.connect(self._zoom_in)
+        zoom_layout.addWidget(zoom_in_btn)
 
-        # Connect zoom buttons
-        self._zoom_1x_btn.clicked.connect(lambda: self._set_zoom_level(1))
-        self._zoom_2x_btn.clicked.connect(lambda: self._set_zoom_level(2))
-        self._zoom_3x_btn.clicked.connect(lambda: self._set_zoom_level(3))
-        self._zoom_4x_btn.clicked.connect(lambda: self._set_zoom_level(4))
-        self._zoom_5x_btn.clicked.connect(lambda: self._set_zoom_level(5))
-        self._zoom_6x_btn.clicked.connect(lambda: self._set_zoom_level(6))
-        self._zoom_7x_btn.clicked.connect(lambda: self._set_zoom_level(7))
-        self._zoom_8x_btn.clicked.connect(lambda: self._set_zoom_level(8))
+        # Reset button
+        reset_btn = QPushButton("Reset")
+        reset_btn.setFixedWidth(50)
+        reset_btn.setToolTip("Reset zoom to default")
+        reset_btn.clicked.connect(lambda: self._zoom_slider.setValue(BASE_THUMB_SIZE))
+        zoom_layout.addWidget(reset_btn)
 
         toolbar.addLayout(zoom_layout)
         toolbar.addSpacing(10)
@@ -571,19 +573,29 @@ class ReviewView(QWidget):
         QShortcut(QKeySequence("+"), self, self._zoom_in)
         QShortcut(QKeySequence("="), self, self._zoom_in)  # Also + without Shift
         QShortcut(QKeySequence("-"), self, self._zoom_out)
-        QShortcut(QKeySequence("0"), self, lambda: self._set_zoom_level(1))  # Reset
+        QShortcut(QKeySequence("0"), self, lambda: self._zoom_slider.setValue(BASE_THUMB_SIZE))  # Reset
 
     # ── Zoom helper methods ──────────────────────────────
 
     def _get_display_size(self) -> int:
-        """Get current thumbnail display size based on zoom level."""
-        return BASE_THUMB_SIZE * self._zoom_level
+        """Get current thumbnail display size from slider."""
+        return self._current_display_size
 
     def _get_grid_columns(self) -> int:
-        """Get column count based on zoom level."""
-        # 1x: 4 cols, 2x: 3 cols, 3x: 2 cols, 4x-8x: 1 col
-        columns_map = {1: 4, 2: 3, 3: 2, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1}
-        return columns_map.get(self._zoom_level, 4)
+        """Calculate column count dynamically based on available width and thumb size."""
+        # Get available width from scroll area
+        available_width = self._scroll.viewport().width()
+
+        # Widget width = display_size + 16px padding
+        widget_width = self._current_display_size + 16
+
+        # Add grid spacing (8px between widgets)
+        widget_width_with_spacing = widget_width + 8
+
+        # Calculate how many columns fit
+        columns = max(1, available_width // widget_width_with_spacing)
+
+        return columns
 
     def _load_high_res_pixmap(self, photo: Photo, display_size: int) -> QPixmap:
         """Load photo from original file, scaled to display_size with high quality."""
@@ -618,33 +630,25 @@ class ReviewView(QWidget):
             return QPixmap()
 
     def _zoom_in(self):
-        """Increase zoom level."""
-        if self._zoom_level < 8:
-            self._set_zoom_level(self._zoom_level + 1)
+        """Increase thumbnail size."""
+        current = self._zoom_slider.value()
+        # Increase by 20px steps for smooth but noticeable change
+        new_value = min(MAX_THUMB_SIZE, current + 20)
+        self._zoom_slider.setValue(new_value)
 
     def _zoom_out(self):
-        """Decrease zoom level."""
-        if self._zoom_level > 1:
-            self._set_zoom_level(self._zoom_level - 1)
+        """Decrease thumbnail size."""
+        current = self._zoom_slider.value()
+        # Decrease by 20px steps
+        new_value = max(MIN_THUMB_SIZE, current - 20)
+        self._zoom_slider.setValue(new_value)
 
-    def _set_zoom_level(self, level: int):
-        """Change zoom level and rebuild grid."""
-        if level not in ZOOM_LEVELS:
-            return
+    def _on_zoom_changed(self, value: int):
+        """Handle zoom slider value change."""
+        self._current_display_size = value
+        self._zoom_slider.setToolTip(f"Thumbnail size: {value}px")
 
-        self._zoom_level = level
-
-        # Update button states
-        self._zoom_1x_btn.setChecked(level == 1)
-        self._zoom_2x_btn.setChecked(level == 2)
-        self._zoom_3x_btn.setChecked(level == 3)
-        self._zoom_4x_btn.setChecked(level == 4)
-        self._zoom_5x_btn.setChecked(level == 5)
-        self._zoom_6x_btn.setChecked(level == 6)
-        self._zoom_7x_btn.setChecked(level == 7)
-        self._zoom_8x_btn.setChecked(level == 8)
-
-        # Rebuild grid with new zoom
+        # Rebuild grid with new size
         self._rebuild_grid_with_zoom()
 
         # Re-select current photo if any
@@ -674,10 +678,10 @@ class ReviewView(QWidget):
             widget.update_size(display_size)
 
             # Load high-res or cached thumbnail
-            if self._zoom_level > 1:
+            if display_size > 200:
                 pixmap = self._load_high_res_pixmap(photo, display_size)
             else:
-                # Use cached 200×200 for 1x
+                # Use cached 200×200 for smaller sizes
                 if photo.thumb_path and os.path.isfile(photo.thumb_path):
                     pixmap = QPixmap(photo.thumb_path)
                 else:
