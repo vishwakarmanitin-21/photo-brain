@@ -27,7 +27,7 @@ class ScanWorker(QThread):
         source_folder: str,
         store: SessionStore,
         session_id: str,
-        phash_threshold: int = 8,
+        phash_threshold: int = 12,
         keep_per_cluster: int = 2,
         event_gap_hours: float = 4.0,
         face_detection_enabled: bool = True,

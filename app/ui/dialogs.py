@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 class SettingsDialog(QDialog):
     def __init__(
         self,
-        threshold: int = 8,
+        threshold: int = 12,
         keep_count: int = 2,
         event_gap_hours: float = 4.0,
         face_detection_enabled: bool = True,
@@ -31,8 +31,8 @@ class SettingsDialog(QDialog):
         self._threshold_spin.setToolTip("Lower = stricter matching (fewer false positives)")
         form.addRow("pHash Threshold:", self._threshold_spin)
 
-        hint = QLabel("Lower values find only very similar photos.\n"
-                       "Higher values group loosely similar photos.")
+        hint = QLabel("Default: 12 (similar shots from same scene).\n"
+                       "Lower values = stricter matching. Higher = broader grouping.")
         hint.setStyleSheet("font-size: 10px; color: #888;")
         form.addRow("", hint)
 

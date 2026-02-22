@@ -82,7 +82,7 @@ class SessionState:
     updated_at: str = ""
     total_files: int = 0
     scanned_files: int = 0
-    phash_threshold: int = 8
+    phash_threshold: int = 12
     keep_per_cluster: int = 2
     last_apply_log: Optional[str] = None
     event_gap_hours: float = 4.0

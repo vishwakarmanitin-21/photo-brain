@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS session (
     updated_at TEXT NOT NULL,
     total_files INTEGER DEFAULT 0,
     scanned_files INTEGER DEFAULT 0,
-    phash_threshold INTEGER DEFAULT 8,
+    phash_threshold INTEGER DEFAULT 12,
     keep_per_cluster INTEGER DEFAULT 2,
     last_apply_log TEXT,
     event_gap_hours REAL DEFAULT 4.0,
