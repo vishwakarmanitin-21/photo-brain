@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         self.thumb_cache: ThumbnailCache | None = None
 
         # Settings defaults
-        self._phash_threshold = 12
+        self._phash_threshold = 17
         self._keep_per_cluster = 2
         self._event_gap_hours = 4.0
         self._face_detection_enabled = True

@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt
 class SettingsDialog(QDialog):
     def __init__(
         self,
-        threshold: int = 12,
+        threshold: int = 17,
         keep_count: int = 2,
         event_gap_hours: float = 4.0,
         face_detection_enabled: bool = True,
@@ -26,13 +26,13 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
 
         self._threshold_spin = QSpinBox()
-        self._threshold_spin.setRange(1, 20)
+        self._threshold_spin.setRange(1, 30)
         self._threshold_spin.setValue(threshold)
         self._threshold_spin.setToolTip("Lower = stricter matching (fewer false positives)")
         form.addRow("pHash Threshold:", self._threshold_spin)
 
-        hint = QLabel("Default: 12 (similar shots from same scene).\n"
-                       "Lower values = stricter matching. Higher = broader grouping.")
+        hint = QLabel("Default: 17 (related shots from same location/session).\n"
+                       "Lower = stricter. Higher = broader grouping. Range: 1-30")
         hint.setStyleSheet("font-size: 10px; color: #888;")
         form.addRow("", hint)
 

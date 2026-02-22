@@ -52,7 +52,7 @@ def group_by_sha256(photos: list[Photo]) -> dict[str, list[Photo]]:
 
 
 def build_clusters(
-    photos: list[Photo], threshold: int = 12
+    photos: list[Photo], threshold: int = 17
 ) -> tuple[list[Cluster], dict[str, list[Photo]]]:
     """Full clustering pipeline.
 
