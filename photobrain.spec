@@ -32,6 +32,9 @@ a = Analysis(
         'PIL',
         'imagehash',
         'send2trash',
+        'scipy',
+        'scipy.spatial',
+        'scipy.spatial.transform',
         'PySide6',
         'PySide6.QtWidgets',
         'PySide6.QtCore',
@@ -43,7 +46,6 @@ a = Analysis(
     excludes=[
         'tkinter',
         'matplotlib',
-        'scipy',
         'pandas',
         'IPython',
         'jupyter',

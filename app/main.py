@@ -10,7 +10,10 @@ from app.ui.main_window import MainWindow
 
 def _icon_path() -> str:
     """Resolve path to the app icon bundled in assets/."""
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "assets", "photobrain.ico")
 
 
