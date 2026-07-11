@@ -13,11 +13,14 @@ from app.ui.review_view import ReviewView
 from app.ui.dialogs import SettingsDialog, ApplyConfirmDialog, UndoResultDialog
 from app.core.session_store import SessionStore
 from app.core.models import SessionStatus, Verdict
-from app.core.thumbnails import ThumbnailCache
+from app.core.thumbnails import PreviewCache, ThumbnailCache
 from app.core.file_ops import FileOperator
 from app.workers.scan_worker import ScanWorker
 from app.workers.thumb_worker import ThumbWorker
-from app.util.paths import get_db_path, get_thumb_dir, get_log_dir
+from app.workers.preview_worker import PreviewWorker
+from app.util.paths import (
+    get_db_path, get_thumb_dir, get_preview_dir, get_log_dir,
+)
 from app.util.logging_util import setup_logging
 
 log = logging.getLogger("photobrain.main_window")
@@ -36,6 +39,8 @@ class MainWindow(QMainWindow):
         self.scan_worker: ScanWorker | None = None
         self.thumb_worker: ThumbWorker | None = None
         self.thumb_cache: ThumbnailCache | None = None
+        self.preview_cache: PreviewCache | None = None
+        self.preview_workers: set[PreviewWorker] = set()
 
         # Settings defaults
         self._phash_threshold = 17
@@ -79,6 +84,7 @@ class MainWindow(QMainWindow):
         self.review_view.undo_requested.connect(self._on_undo)
         self.review_view.back_requested.connect(self._go_home)
         self.review_view.review_state_changed.connect(self._schedule_review_save)
+        self.review_view.previews_requested.connect(self._start_preview_worker)
 
     # ── Navigation ───────────────────────────────────────
 
@@ -128,6 +134,7 @@ class MainWindow(QMainWindow):
         )
 
         self.thumb_cache = ThumbnailCache(get_thumb_dir(folder))
+        self.preview_cache = PreviewCache(get_preview_dir(folder))
 
         # Switch to scan view and start
         self.scan_view.reset()
@@ -188,6 +195,7 @@ class MainWindow(QMainWindow):
             self.store.close()
         self.store = SessionStore(db_path)
         self.thumb_cache = ThumbnailCache(get_thumb_dir(folder))
+        self.preview_cache = PreviewCache(get_preview_dir(folder))
 
         session = self.store.get_session()
         if not session:
@@ -243,6 +251,23 @@ class MainWindow(QMainWindow):
         self.thumb_worker = ThumbWorker(photos, self.thumb_cache)
         self.thumb_worker.thumb_ready.connect(self.review_view.on_thumb_ready)
         self.thumb_worker.start()
+
+    @Slot(object, int)
+    def _start_preview_worker(self, photos, display_size: int):
+        """Decode and resize requested originals outside the UI thread."""
+        if not self.preview_cache or not photos:
+            return
+        for worker in list(self.preview_workers):
+            if worker.isRunning():
+                worker.cancel()
+
+        worker = PreviewWorker(photos, display_size, self.preview_cache)
+        self.preview_workers.add(worker)
+        worker.preview_ready.connect(self.review_view.on_preview_ready)
+        worker.finished.connect(
+            lambda current=worker: self.preview_workers.discard(current)
+        )
+        worker.start()
 
     @Slot()
     def _schedule_review_save(self):
@@ -463,6 +488,10 @@ class MainWindow(QMainWindow):
         if self.thumb_worker and self.thumb_worker.isRunning():
             self.thumb_worker.cancel()
             self.thumb_worker.wait(2000)
+        for worker in list(self.preview_workers):
+            if worker.isRunning():
+                worker.cancel()
+                worker.wait(2000)
         if self.store:
             self.store.close()
         event.accept()

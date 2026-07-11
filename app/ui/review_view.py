@@ -325,6 +325,7 @@ class ReviewView(QWidget):
     undo_requested = Signal()
     back_requested = Signal()
     review_state_changed = Signal()
+    previews_requested = Signal(object, int)  # photos, display_size
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -338,6 +339,8 @@ class ReviewView(QWidget):
         self._selected_photo_id: str | None = None
         self._current_photos: list[Photo] = []  # Current cluster photos
         self._current_display_size = BASE_THUMB_SIZE  # Current thumbnail display size
+        self._preview_pixmaps: dict[str, QPixmap] = {}
+        self._preview_pixmap_size = BASE_THUMB_SIZE
         self._zoom_debounce = QTimer(self)
         self._zoom_debounce.setSingleShot(True)
         self._zoom_debounce.setInterval(150)
@@ -613,38 +616,6 @@ class ReviewView(QWidget):
 
         return columns
 
-    def _load_high_res_pixmap(self, photo: Photo, display_size: int) -> QPixmap:
-        """Load photo from original file, scaled to display_size with high quality."""
-        from PIL import Image
-        from io import BytesIO
-
-        try:
-            # Load original
-            img = Image.open(photo.filepath)
-
-            # Convert to RGB if needed
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-
-            # Resize with high-quality Lanczos filter
-            img.thumbnail((display_size, display_size), Image.Resampling.LANCZOS)
-
-            # Convert PIL → QPixmap
-            buffer = BytesIO()
-            img.save(buffer, format='JPEG', quality=95)
-            buffer.seek(0)
-
-            pixmap = QPixmap()
-            pixmap.loadFromData(buffer.read())
-            return pixmap
-
-        except Exception as e:
-            log.warning("Failed to load high-res for %s: %s", photo.filepath, e)
-            # Fallback to cached thumbnail
-            if photo.thumb_path and os.path.isfile(photo.thumb_path):
-                return QPixmap(photo.thumb_path)
-            return QPixmap()
-
     def _zoom_in(self):
         """Increase thumbnail size."""
         current = self._zoom_slider.value()
@@ -661,6 +632,9 @@ class ReviewView(QWidget):
 
     def _on_zoom_changed(self, value: int):
         """Handle zoom slider value change."""
+        if value != self._preview_pixmap_size:
+            self._preview_pixmaps.clear()
+            self._preview_pixmap_size = value
         self._current_display_size = value
         self._zoom_slider.setToolTip(f"Thumbnail size: {value}px")
 
@@ -701,6 +675,7 @@ class ReviewView(QWidget):
 
         display_size = self._get_display_size()
         grid_columns = self._get_grid_columns()
+        missing_previews: list[Photo] = []
 
         for i, photo in enumerate(self._current_photos):
             widget = ThumbnailWidget(photo)
@@ -708,7 +683,11 @@ class ReviewView(QWidget):
 
             # Load high-res or cached thumbnail
             if display_size > 200:
-                pixmap = self._load_high_res_pixmap(photo, display_size)
+                pixmap = self._preview_pixmaps.get(photo.id, QPixmap())
+                if pixmap.isNull():
+                    if photo.thumb_path and os.path.isfile(photo.thumb_path):
+                        pixmap = QPixmap(photo.thumb_path)
+                    missing_previews.append(photo)
             else:
                 # Use cached 200×200 for smaller sizes
                 if photo.thumb_path and os.path.isfile(photo.thumb_path):
@@ -730,6 +709,25 @@ class ReviewView(QWidget):
             self._grid_layout.addWidget(widget, row, col)
 
             self._thumb_widgets[photo.id] = widget
+
+        if missing_previews:
+            self.previews_requested.emit(missing_previews, display_size)
+
+    @Slot(str, int, object)
+    def on_preview_ready(self, photo_id: str, display_size: int, image):
+        """Swap in a worker-decoded preview if it still matches the view."""
+        if display_size != self._current_display_size:
+            return
+        if not any(photo.id == photo_id for photo in self._current_photos):
+            return
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull():
+            return
+        self._preview_pixmaps[photo_id] = pixmap
+        self._preview_pixmap_size = display_size
+        widget = self._thumb_widgets.get(photo_id)
+        if widget:
+            widget.set_pixmap(pixmap, display_size)
 
     def _show_hover_preview(self, photo_id: str, cursor_pos: QPoint):
         """Show full-size preview on hover."""
@@ -763,6 +761,7 @@ class ReviewView(QWidget):
     ):
         self._all_clusters = clusters
         self._cluster_photos = cluster_photos
+        self._preview_pixmaps.clear()
         self._undo_btn.setEnabled(has_undo)
 
         # Build event data
@@ -904,6 +903,8 @@ class ReviewView(QWidget):
         )
 
     def _show_cluster_photos(self, cluster: Cluster, photos: list[Photo]):
+        if photos is not self._current_photos:
+            self._preview_pixmaps.clear()
         self._current_photos = photos
         self._rebuild_grid_with_zoom()
 

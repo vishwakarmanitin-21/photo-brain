@@ -3,6 +3,7 @@ import os
 
 PHOTOBRAIN_DIR = ".photobrain"
 THUMBS_DIR = "thumbs"
+PREVIEWS_DIR = "previews"
 LOGS_DIR = "logs"
 DB_FILENAME = "session.db"
 
@@ -32,6 +33,12 @@ def get_db_path(source_folder: str) -> str:
 
 def get_thumb_dir(source_folder: str) -> str:
     path = os.path.join(get_photobrain_dir(source_folder), THUMBS_DIR)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def get_preview_dir(source_folder: str) -> str:
+    path = os.path.join(get_photobrain_dir(source_folder), PREVIEWS_DIR)
     os.makedirs(path, exist_ok=True)
     return path
 
