@@ -156,10 +156,13 @@ Accessible from the home screen:
 
 ## Quality Score Formula
 
+Every component is normalized to [0, 1] before weighting, so the score is
+itself in [0, 1] and the weights mean exactly what they say:
+
 ```
-score = 0.45 * log(sharpness + 1)
-      + 0.13 * (brightness / 255)
-      + 0.10 * min(face_count, 3)
+score = 0.45 * sharpness_norm      # min(1, log(sharpness+1) / log(1001))
+      + 0.13 * exposure            # 1 - |brightness - 128| / 128
+      + 0.10 * (min(face_count, 3) / 3)
       + 0.12 * eyes_open_score
       + 0.09 * smile_score
       + 0.05 * subject_isolation
@@ -169,16 +172,20 @@ score = 0.45 * log(sharpness + 1)
 
 | Component | Weight | Description |
 |-----------|--------|-------------|
-| **Sharpness** | 45% | Variance of the Laplacian (measures edge contrast / focus). Log-compressed. |
-| **Brightness** | 13% | Mean pixel luminance normalized to [0, 1]. |
-| **Face count** | 10% | Number of detected faces, capped at 3. |
+| **Sharpness** | 45% | Contrast-normalized variance of the Laplacian (focus). Normalizing by image contrast means a darker exposure of the same shot does not read as "blurrier". Log-compressed and capped at a reference of 1000 (decisively sharp). |
+| **Exposure** | 13% | Peaks at mid-gray (128). Overexposed (blown-out) frames are penalized exactly like underexposed ones. |
+| **Face count** | 10% | Number of detected faces, capped at 3, scaled to [0, 1]. |
 | **Eyes open** | 12% | Average eyes-open score across faces (0 = closed, 1 = open). |
 | **Smile** | 9% | Average smile score across faces (0 = neutral, 1 = smiling). |
 | **Subject isolation** | 5% | Composition cleanliness — 1.0 for clean portraits and uniform groups, < 1.0 when small background bystanders are detected. |
 | **Expression naturalness** | 4% | Penalizes awkward/unflattering expressions (squinting, frowning, mid-speech, jaw tension). 1.0 = natural/relaxed, lower = awkward. |
 | **Head pose frontal** | 2% | Rewards frontal, flattering head angles. 1.0 = frontal (yaw≈0, pitch≈0, roll≈0), lower = extreme angles (profile, looking up/down). |
 
-Photos without faces compete on sharpness and brightness only (face/expression/isolation/naturalness/pose terms are 0).
+The upshot: between two acceptably sharp frames of the same people, the one
+with open eyes and a smile wins — a blink is no longer rescued by a slightly
+crisper frame, while a genuinely blurred frame still loses to a sharp one.
+Photos without faces compete on sharpness and exposure only. Unreadable
+files are left "undecided" for manual review instead of being auto-kept.
 
 ## Project Structure
 
