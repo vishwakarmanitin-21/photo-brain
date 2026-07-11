@@ -101,6 +101,16 @@ class MainWindow(QMainWindow):
         self.source_folder = folder
         setup_logging(get_log_dir(folder))
 
+        # A worker from a previous scan may still hold a connection to the
+        # old store; closing it underneath the worker corrupts mid-writes.
+        if not self._ensure_scan_worker_stopped():
+            QMessageBox.information(
+                self, "Previous Scan Still Stopping",
+                "The previous scan is still shutting down.\n"
+                "Please try again in a few seconds.",
+            )
+            return
+
         # Open/create session store
         db_path = get_db_path(folder)
         if self.store:
@@ -161,11 +171,21 @@ class MainWindow(QMainWindow):
         self.scan_worker.scan_error.connect(self._on_scan_error)
         self.scan_worker.start()
 
+    def _ensure_scan_worker_stopped(self, timeout_ms: int = 10000) -> bool:
+        """Cancel a running scan worker and wait for it to exit.
+
+        Returns True when no scan worker is running afterwards. Callers must
+        not close or replace the session store while this returns False —
+        the worker thread still holds a live SQLite connection.
+        """
+        if not (self.scan_worker and self.scan_worker.isRunning()):
+            return True
+        self.scan_worker.cancel()
+        return self.scan_worker.wait(timeout_ms)
+
     @Slot()
     def _cancel_scan(self):
-        if self.scan_worker and self.scan_worker.isRunning():
-            self.scan_worker.cancel()
-            self.scan_worker.wait(5000)
+        self._ensure_scan_worker_stopped(5000)
         self.scan_view.stop_timer()
         self._navigate(VIEW_SETUP)
 
@@ -491,9 +511,7 @@ class MainWindow(QMainWindow):
                 self._persist_review_state()
             except Exception:
                 log.exception("Failed to persist review state during close")
-        if self.scan_worker and self.scan_worker.isRunning():
-            self.scan_worker.cancel()
-            self.scan_worker.wait(3000)
+        scan_stopped = self._ensure_scan_worker_stopped()
         if self.thumb_worker and self.thumb_worker.isRunning():
             self.thumb_worker.cancel()
             self.thumb_worker.wait(2000)
@@ -502,5 +520,14 @@ class MainWindow(QMainWindow):
                 worker.cancel()
                 worker.wait(2000)
         if self.store:
-            self.store.close()
+            if scan_stopped:
+                self.store.close()
+            else:
+                # The worker is stuck in a long native call; closing its
+                # connection from here would interrupt a live write. WAL
+                # makes an unclosed connection at process exit crash-safe,
+                # so leaving the store open is the lesser evil.
+                log.warning(
+                    "Scan worker still running at exit; skipping store close"
+                )
         event.accept()
