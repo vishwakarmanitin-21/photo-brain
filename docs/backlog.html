@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhotoBrain — Audit &amp; Backlog</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1d21; --muted: #5c6570; --line: #e3e7ec;
+    --card: #f7f9fb; --accent: #2563eb; --accent-soft: #eff4ff;
+    --crit: #b91c1c; --crit-bg: #fee2e2;
+    --high: #c2410c; --high-bg: #ffedd5;
+    --med: #a16207; --med-bg: #fef9c3;
+    --low: #15803d; --low-bg: #dcfce7;
+    --good: #0f766e; --good-bg: #ccfbf1;
+    --verified: #6d28d9; --verified-bg: #ede9fe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b; --fg: #e6e9ed; --muted: #9aa4b0; --line: #2a3038;
+      --card: #1c2127; --accent: #60a5fa; --accent-soft: #1d2838;
+      --crit: #fca5a5; --crit-bg: #46181a;
+      --high: #fdba74; --high-bg: #43230f;
+      --med: #fde047; --med-bg: #3d3510;
+      --low: #86efac; --low-bg: #12381f;
+      --good: #5eead4; --good-bg: #103732;
+      --verified: #c4b5fd; --verified-bg: #2a2145;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 1080px; padding: 32px 24px 96px;
+         font: 15px/1.6 "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 30px; margin: 0 0 4px; }
+  h2 { font-size: 21px; margin: 44px 0 10px; padding-top: 20px; border-top: 2px solid var(--line); }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p, li { color: var(--fg); }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .lead { font-size: 16px; background: var(--accent-soft); border-left: 4px solid var(--accent);
+          padding: 14px 18px; border-radius: 0 8px 8px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 14px; }
+  th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--line);
+       font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: var(--card); }
+  .id { font-family: Consolas, monospace; font-size: 12.5px; white-space: nowrap; color: var(--muted); }
+  .loc { font-family: Consolas, monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 999px;
+           font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .b-crit { color: var(--crit); background: var(--crit-bg); }
+  .b-high { color: var(--high); background: var(--high-bg); }
+  .b-med  { color: var(--med);  background: var(--med-bg); }
+  .b-low  { color: var(--low);  background: var(--low-bg); }
+  .b-good { color: var(--good); background: var(--good-bg); }
+  .b-ver  { color: var(--verified); background: var(--verified-bg); }
+  .b-eff  { color: var(--muted); background: var(--card); border: 1px solid var(--line); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 16px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card b { display: block; margin-bottom: 4px; }
+  .card .grade { float: right; font-size: 22px; font-weight: 700; }
+  .g-a { color: var(--low); } .g-b { color: var(--med); } .g-c { color: var(--high); } .g-d { color: var(--crit); }
+  details { margin: 8px 0 18px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; background: var(--card); }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+  .phase { border-left: 4px solid var(--accent); background: var(--card);
+           border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 14px 0; }
+  .phase h3 { margin: 0 0 6px; }
+  .tablewrap { overflow-x: auto; }
+  code { font-family: Consolas, monospace; font-size: 13px; background: var(--card);
+         border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .foot { margin-top: 48px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+
+<h1>PhotoBrain — Audit &amp; Backlog</h1>
+<p class="sub">Produced 11 Jul 2026 · full code audit (all ~4,900 lines) + live run of the app through scan → review → apply → undo + market research on competitors and distribution. <b>No code was changed.</b> Status of every item: <i>Proposed</i>.</p>
+
+<p class="lead"><b>The one-paragraph verdict:</b> PhotoBrain's engine is genuinely good — clean architecture, a working end-to-end pipeline, and a feature (face/expression-aware "best shot" picking) that <b>no free Windows tool offers today</b>. The gap between here and a tool strangers love is not missing features; it's (1) a small set of data-safety bugs that could lose a user's decisions or files, (2) a scoring formula whose face/expression intelligence is mathematically drowned out — so the headline differentiator doesn't actually decide picks yet (§F) — and a curation flow that auto-keeps all standalone junk (§G), (3) a distribution story that currently ends at a SmartScreen warning and a "Private — all rights reserved" license on a public repo, and (4) first-ten-minutes polish. Fix safety first, then make the core promise true, then launch-readiness, then delight, then scale.</p>
+
+<h2 id="scorecard">Scorecard</h2>
+<div class="cards">
+  <div class="card"><span class="grade g-b">B</span><b>Code quality</b>Clean core/ui/worker layering, deterministic, defensive per-photo error handling. Held back by a god-object review view and zero tests.</div>
+  <div class="card"><span class="grade g-c">C−</span><b>Data safety</b>Recycle-Bin-only deletes and undo are the right design, but the undo journal isn't crash-safe and the undo→re-apply flow is broken (verified live).</div>
+  <div class="card"><span class="grade g-b">B−</span><b>UX</b>The keyboard review flow is fast and the apply confirmation is exemplary — but it's undiscoverable, jargon-heavy, and loses work on exit.</div>
+  <div class="card"><span class="grade g-c">C+</span><b>UI / Visual</b>Functional and consistent-ish; ~60 hardcoded inline styles, no dark mode, no DPI awareness, no window-state memory.</div>
+  <div class="card"><span class="grade g-c">C</span><b>Scalability</b>Honest about its ~5k ceiling. O(n²) clustering, single-threaded face phase, and up-to-6× image decoding set the ceiling; all fixable locally.</div>
+  <div class="card"><span class="grade g-d">D</span><b>Adoptability</b>Public repo with 0 stars, no license, no screenshots, no releases, no signing. Everything here is high-leverage and mostly non-code work.</div>
+  <div class="card"><span class="grade g-c">C</span><b>Core promise</b>Finds and trims duplicate groups well — but the "best shot" pick is sharpness-only in practice (§F), standalone junk is auto-kept (§G), and the clustering threshold is unvalidated on real photos.</div>
+</div>
+
+<h2 id="strengths">What's already strong (keep and protect)</h2>
+<ul>
+  <li><b>Architecture discipline is real.</b> <code>app/core/</code> has zero Qt imports; every pipeline stage is a pure function with progress/cancel callbacks — this is exactly the shape that makes testing and multiprocessing easy later.</li>
+  <li><b>The safety design is right:</b> DELETE goes to Recycle Bin via send2trash (with the Windows path gotcha handled), KEEP/ARCHIVE are reversible moves, and the apply confirmation dialog changes tone when deletes are present.</li>
+  <li><b>Smart dedup optimization:</b> pHash, scoring and face detection run once per unique SHA256 and copy to duplicates.</li>
+  <li><b>Deterministic everywhere</b> — sorted inputs, filepath tiebreakers — so results are reproducible.</li>
+  <li><b>Live scan stats</b> (13 counters + elapsed + current file) are far better feedback than a bare progress bar.</li>
+  <li><b>Verified live:</b> scan → cluster → suggest → apply → undo all worked on a 15-photo synthetic set: exact dupes caught, the blurry frame archived, the sharpest kept, all 15 files restored to their original paths on undo, and a corrupt JPEG didn't crash the scan.</li>
+</ul>
+
+<h2 id="safety">A. Data-safety &amp; correctness findings</h2>
+<p>These are the items that can lose user work or files. For a tool whose whole pitch is "safe photo cleanup," they outrank everything else. <span class="badge b-ver">VERIFIED LIVE</span> = reproduced in the running app during this audit.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Where</th><th>Eff.</th></tr>
+  <tr><td class="id">SAFE-01</td><td><span class="badge b-crit">Critical</span></td>
+    <td><b>Undo journal is written only after ALL moves finish.</b> A crash or power cut mid-apply (photo 3,000 of 6,000) leaves every completed move — including Recycle-Bin deletes — unrecorded: no CSV, no DB log, Undo does nothing, DB paths point at empty locations. Fix: write each journal entry to SQLite (WAL) per move in small committed batches; CSV/JSON become end-of-run summaries.</td>
+    <td class="loc">core/file_ops.py:43,101-104</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SAFE-02</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>After Undo, you can never Apply again.</b> Undo restores files but never clears the clusters' <code>applied</code> flags, and global Apply filters applied clusters out — clicking Apply after an undo shows "Nothing to Apply." Reproduced in the running app. Fix: reset <code>applied</code> (and session status) for all clusters touched by the undone apply.</td>
+    <td class="loc">ui/main_window.py:359-388 vs 241-245</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-03</td><td><span class="badge b-high">High</span></td>
+    <td><b>Closing the app mid-review discards every verdict.</b> Verdict changes live only in memory until Apply; <code>closeEvent</code> never persists them — despite the README promising "close the app and resume your review session later." Fix: debounced autosave on verdict change + flush on close.</td>
+    <td class="loc">ui/main_window.py:235-237,407-416</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-04</td><td><span class="badge b-high">High</span></td>
+    <td><b>Global Apply marks untouched clusters as applied.</b> Clusters whose photos were all still undecided get flagged applied and silently excluded from every future apply. Same root family as SAFE-02. Fix: only mark clusters where at least one photo was processed.</td>
+    <td class="loc">ui/main_window.py:279-280</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-05</td><td><span class="badge b-high">High</span></td>
+    <td><b>Non-ASCII folder names silently break scoring and faces.</b> OpenCV's <code>imread</code> can't open Windows paths with Hindi/CJK/emoji characters; it returns <code>None</code>, so every photo in <code>D:\Photos\शादी 2024\</code> gets sharpness 0, faces 0 — and the keep/archive suggestions become effectively random. Fix: <code>cv2.imdecode(np.fromfile(...))</code> everywhere.</td>
+    <td class="loc">core/scoring.py:15,27 · core/faces.py:239,448</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-06</td><td><span class="badge b-high">High</span></td>
+    <td><b>Undo wipes the whole journal even when some restores failed.</b> A locked file's failed restore is counted as "skipped" but its journal entry is deleted anyway — the file is stranded in the archive folder with no in-app record. Fix: delete only successfully restored entries; offer retry.</td>
+    <td class="loc">core/file_ops.py:229</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-07</td><td><span class="badge b-high">High</span></td>
+    <td><b>One SQLite connection shared across threads with no lock.</b> <code>check_same_thread=False</code> disables the guard, it doesn't add safety; scan-worker writes can interleave with main-thread reads/deletes (e.g. cancel scan → immediately pick new folder) → exceptions or half-committed batches. Fix: per-thread connections or a lock inside SessionStore.</td>
+    <td class="loc">core/session_store.py:170 · workers/scan_worker.py:28</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SAFE-08</td><td><span class="badge b-high">High</span></td>
+    <td><b>Starting a new scan silently destroys the previous session</b> — no warning, even though the home screen just offered "Resume Previous Session." One misclick erases hours of review decisions. Fix: confirmation dialog with the decision count.</td>
+    <td class="loc">ui/main_window.py:99-101</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-09</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Missing "last copy" guard before DELETE.</b> A dead <code>keep_shas</code> lookup shows the intent: warn when the user deletes every copy of a photo with no KEEP survivor. It was never wired in. Fix: implement the warning (or remove the dead code consciously).</td>
+    <td class="loc">core/file_ops.py:38-41</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-10</td><td><span class="badge b-med">Med</span></td>
+    <td><b>DB filepaths never updated after apply/undo moves</b> — collision-renamed restores (<code>name_1.jpg</code>) and re-applies then report "Source file missing." Fix: write back the new path on every successful move.</td>
+    <td class="loc">core/file_ops.py:82,215-221</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SAFE-11</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Cancelled/failed scans leave the session stuck in SCANNING</b> with half-written photos and no clusters; reopening that folder is undefined. Fix: reset to NEW/FAILED in a <code>finally</code>.</td>
+    <td class="loc">workers/scan_worker.py:51-124</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-12</td><td><span class="badge b-med">Med</span></td>
+    <td>Cluster of smaller robustness holes: close/cancel can time out and close the DB under a live worker (main_window.py:132,408); PIL handles leaked in hashing/events/thumbnails can cause WinError 32 on the very file being moved; TOCTOU <code>getsize</code> crash kills a whole scan if OneDrive dehydrates one file mid-scan (scanner.py:52); paths &gt;260 chars unhandled; collision resolution can silently overwrite under a race. Fix as one "hardening" batch.</td>
+    <td class="loc">multiple (see agents' notes)</td><td><span class="badge b-eff">M</span></td></tr>
+</table></div>
+
+<h2 id="ux">B. UX &amp; UI findings</h2>
+
+<h3>Critical performance-feel issues</h3>
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Where</th><th>Eff.</th></tr>
+  <tr><td class="id">UX-01</td><td><span class="badge b-crit">Critical</span></td>
+    <td><b>Image decoding runs on the UI thread in the zoom path.</b> Above 200px zoom, each photo is opened with PIL, Lanczos-resized, re-encoded and decoded again — synchronously, per photo, in a loop. A 40-photo cluster of 12MP files freezes the app for seconds. Also violates the project's own "ui/ = widgets only" rule. Fix: move to a resize worker with per-(photo,size) cache, deliver via signals.</td>
+    <td class="loc">ui/review_view.py:600-630,676-690</td><td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">UX-02</td><td><span class="badge b-crit">Critical</span></td>
+    <td><b>Zoom slider rebuilds the whole grid on every tick</b> — dozens of teardown/recreate cycles per drag, each re-reading images from disk (hitting UX-01). Fix: ~150ms debounce; rescale cached pixmaps during drag, reload on release.</td>
+    <td class="loc">ui/review_view.py:371,646-703</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">UX-03</td><td><span class="badge b-high">High</span></td>
+    <td>Hover preview loads the full-resolution original synchronously mid-mouse-move; folder picker walks the whole tree synchronously after Browse (app looks hung on huge/network folders); Cancel blocks the UI for up to 5s. Fix: async loads + chunked counting + signal-driven navigation.</td>
+    <td class="loc">review_view.py:712 · setup_view.py:118-132 · main_window.py:134</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-04</td><td><span class="badge b-high">High</span></td>
+    <td>Thread/widget hygiene: a new ThumbWorker starts on every review load without stopping the old one (crash risk); zoom teardown uses <code>setParent(None)</code> instead of <code>deleteLater()</code> (leaks); late thumbnails downgrade already-loaded high-res images.</td>
+    <td class="loc">main_window.py:220-225 · review_view.py:663-667,765-771</td><td><span class="badge b-eff">M</span></td></tr>
+</table></div>
+
+<h3>Workflow &amp; discoverability</h3>
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">UX-05</td><td><span class="badge b-high">High</span></td>
+    <td><b>The headline feature is invisible.</b> 14 keyboard shortcuts (K/A/D/R, zoom, Alt+hover) exist only in the README — no menu bar, no "?" overlay, no tooltip hints. A non-README user will never find the keyboard-driven workflow the app is named for. Fix: shortcut overlay (?) + hints in button tooltips + a one-line status-bar tip.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-06</td><td><span class="badge b-high">High</span></td>
+    <td><b>Ctrl+Z doesn't undo what users expect.</b> It triggers the file-restore undo of the last Apply, not "un-mark the photo I just fat-fingered as DELETE." There is no verdict-level undo at all. Fix: verdict undo stack on Ctrl+Z; move apply-undo to a button/Ctrl+Shift+Z.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-07</td><td><span class="badge b-high">High</span></td>
+    <td><b>Global shortcuts fire on the wrong screens.</b> Review shortcuts use window-level context while the review page is always instantiated — Ctrl+Enter during a scan can trigger the apply flow against a store the worker is writing. Fix: widget-scoped shortcut context or screen guards.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">UX-08</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Review list is cluttered with noise:</b> five single-photo "clusters" of one auto-KEEP photo each appeared alongside the real duplicate groups, labels are cryptic and non-sequential ("Cluster 8 (3) [EXACT]", "[OK]", "[APPLIED]"), and "cluster/REVIEW" is developer vocabulary. Fix: hide or collapse singletons behind a filter; plain words ("Exact duplicates", "Undecided") + icons.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-09</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Scan progress bar fills to 100% then resets for each phase</b> (~8 times per scan) — it read 100% while "Detecting faces…" was still running. No overall ETA. Fix: weighted overall progress + "Phase 3/8" label.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">UX-10</td><td><span class="badge b-med">Med</span></td>
+    <td>Enter confirms the apply dialog by default even when deletes are present (two accidental keystrokes to Recycle Bin); apply resets filters and jumps to cluster 0, losing your place; clean-scan empty state says "No clusters match filters" instead of "your library is already clean"; raw <code>WinError</code> text surfaces in user dialogs.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-11</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Folder can only come from the Browse dialog</b> — the path box is read-only, typed/pasted paths are ignored, no drag-and-drop of a folder onto the window. Fix: editable path + drag-drop.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">UX-12</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Accessibility:</b> verdict is encoded almost entirely by green/orange/red border color — near-identical for red-green colorblind users at review speed; keyboard-only grid navigation is incomplete (no vertical movement within the grid). Fix: letter/icon badge per verdict corner + grid-aware arrows.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-13</td><td><span class="badge b-med">Med</span></td>
+    <td><b>No window/settings persistence</b> — geometry, zoom, and Settings values reset every launch (no QSettings anywhere); <b>no dark mode</b> (hardcoded white patches will render as a patchwork on Win11 dark); <b>no DPI awareness</b> (soft thumbnails and tiny 9-10px fonts at 150% scaling); ~60 inline <code>setStyleSheet</code> calls instead of one theme.</td>
+    <td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">UX-14</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Settings speak engineering:</b> "pHash Threshold" with a raw 1–30 spinner ("Lower = stricter. Higher = broader grouping"). A non-technical user cannot map 17 → outcome. Fix: three presets ("Only near-identical / Similar shots / Loose grouping") with the number under Advanced.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">UX-15</td><td><span class="badge b-med">Med</span></td>
+    <td><b>No first-run guidance</b> (verified: home screen is title + folder box only). Nothing explains scan→review→apply, that files get <i>moved</i> into <code>03_KEEP</code>/archive folders, or that a <code>.photobrain</code> folder appears inside the photo directory. Fix: 3 lines of "How it works" + a note about the folders that will be created.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+</table></div>
+
+<h3>Missing table-stakes features (competitive gaps)</h3>
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">FEAT-01</td><td><span class="badge b-high">High</span></td>
+    <td><b>Side-by-side compare view.</b> The core near-dupe decision is "which of these two is sharper?" — today that's Alt+hover one photo at a time. Every serious competitor (Czkawka, PhotoSweeper's Face-to-Face) has a two-up synced-zoom comparator. The single biggest UX win available.</td>
+    <td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">FEAT-02</td><td><span class="badge b-high">High</span></td>
+    <td><b>HEIC support.</b> iPhones shoot HEIC by default; family-photo folders are full of it. <code>pillow-heif</code> makes this a contained change (hashing, thumbnails, scoring, scanner extension list). The biggest single format gap; WEBP is a cheap add-on at the same time.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">FEAT-03</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Multi-select within a cluster</b> (Ctrl/Shift+click) so "keep these 3 of 12" isn't 9 separate actions.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">FEAT-04</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Space-savings framing.</b> File size is never shown; the apply dialog counts files, not megabytes. Competitors lead with "you'll free 2.3 GB" — it's the number users screenshot and share.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">FEAT-05</td><td><span class="badge b-med">Med</span></td>
+    <td>Sort (score/date/size) and filename search; overall review progress ("34 of 87 groups reviewed"); pre-apply export of the decision list (CSV) and a button to open the last apply log.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">FEAT-06</td><td><span class="badge b-low">Later</span></td>
+    <td>Multi-folder scan with include/exclude; portable mode; RAW support; video dedupe; localization. Noted so they're consciously deferred, not forgotten.</td>
+    <td><span class="badge b-eff">XL</span></td></tr>
+</table></div>
+
+<h2 id="scale">C. Scalability findings</h2>
+<p>The README honestly caps the app at ~5,000 photos. Real libraries people will bring are 20k–300k. digiKam's duplicate search taking "literally days" on 286k images is the cautionary tale — these four items decide whether PhotoBrain can credibly say "large batches" in its marketing. All fixes are local-only (no cloud), per the project's rules.</p>
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">PERF-01</td><td><span class="badge b-high">High</span></td>
+    <td><b>O(n²) pHash clustering, with per-comparison hex re-parsing.</b> ~5k photos ≈ fine; 20k ≈ 3–8 frozen minutes; 50k ≈ 30–90 min; 100k ≈ hours. Fix path: (1) precompute ints once (~5–10×, trivial); (2) numpy uint64 XOR+popcount blocks or a BK-tree; FAISS binary index if a heavier dependency is ever acceptable.</td>
+    <td><span class="badge b-eff">M→L</span></td></tr>
+  <tr><td class="id">PERF-02</td><td><span class="badge b-high">High</span></td>
+    <td><b>Face phase is single-threaded</b> and dominates wall-clock (~150–400ms/photo → 1–2h at 20k). Verified live: faces took ~24 of the 29 scan seconds on 15 photos. The pure-function pipeline is already multiprocessing-ready — a <code>Pool</code> over SHA-group representatives is the natural fix.</td>
+    <td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">PERF-03</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Each photo is fully decoded up to 6 times</b> across pHash, sharpness, brightness (a second imread inside one call!), faces, expressions, thumbnails. Decode once per representative (possibly downscaled) and share.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">PERF-04</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Threshold 17/64 over-merges at scale</b> — union-find chains A~B~C into mega-clusters of unrelated photos as n grows; "keep 2 per cluster" then archives distinct keepers. Fix: cap cluster diameter against the representative, or scale threshold with n.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">PERF-05</td><td><span class="badge b-low">Low</span></td>
+    <td>Thumbnails decode full-res JPEGs (add <code>img.draft()</code> — 4–8× faster); thumb cache is keyed by per-scan UUID so rescans orphan the old files (key by sha256 instead); shard the cache dir past ~20k.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+</table></div>
+
+<h2 id="adopt">D. Adoption &amp; distribution (the "make it popular" work)</h2>
+<p>Market research summary: every free Windows tool (Czkawka, dupeGuru, AntiDupl, VisiPics) picks "keepers" by file size/resolution/date — none looks at faces, open eyes, or smiles. Everything that does is $249 (Excire), subscription (Aftershoot/Narrative), or Mac-only (PhotoSweeper). <b>"Free, local, open-source best-shot picking for Windows" is an empty niche.</b> Czkawka's rise (~20k+ GitHub stars) came from exactly the communities PhotoBrain suits: r/DataHoarder, r/opensource, Show HN — and its stated appeal is the pitch PhotoBrain already embodies: fast, private, no telemetry. Don't compete with Czkawka on raw scan speed; position as the <i>review/culling layer</i> with judgment.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">ADOPT-01</td><td><span class="badge b-crit">Blocker</span></td>
+    <td><b>The repo is public but the license says private.</b> README ends with "Private project. All rights reserved." on a PUBLIC GitHub repo with no LICENSE file — legally nobody may use, package, or contribute to it. Decide the license (MIT or Apache-2.0 recommended for this category) and add the file. Nothing else in this section matters until this is resolved.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">ADOPT-02</td><td><span class="badge b-crit">Blocker</span></td>
+    <td><b>The distribution story currently ends at a SmartScreen wall.</b> UPX compression + unsigned exe is the classic Defender/VirusTotal false-positive pattern; most non-technical users stop at "Windows protected your PC." Fix: <code>upx=False</code> (size is irrelevant in a mediapipe bundle), apply to <b>SignPath Foundation</b> (free OSS code signing), document the "More info → Run anyway" step meanwhile, and ship via <b>winget</b> (community repo, free) which sidesteps the browser-download prompt path.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">ADOPT-03</td><td><span class="badge b-high">High</span></td>
+    <td><b>Bundle the mediapipe models in the installer.</b> Today the first scan downloads them to <code>%TEMP%</code> with a non-atomic write: an offline first run (or an interrupted download, or Windows Storage Sense clearing %TEMP%) silently disables face detection <i>forever</i> — 42% of the quality score gone with no error shown. Fix: ship the ~5MB of models in the package; keep download as fallback with atomic write to <code>%LOCALAPPDATA%\PhotoBrain</code>; surface a one-time error if models can't load.</td>
+    <td class="loc">core/faces.py:41-65 · photobrain.spec:17-20</td></tr>
+  <tr><td class="id">ADOPT-04</td><td><span class="badge b-high">High</span></td>
+    <td><b>README has no visuals and the repo has no shopfront.</b> No screenshots/GIF (repos with them get measurably more stars; visitors decide in ~15s), no repo description, no topics, no GitHub Release. Fix: animated GIF of scan→review→apply above the fold; description + topics (photo-management, duplicate-finder, windows, offline, pyside6); a v1.0 Release with a clearly-named zip; a GitHub Pages landing page later.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">ADOPT-05</td><td><span class="badge b-high">High</span></td>
+    <td><b>Lead with the privacy/safety pitch</b> — it's verbatim why Czkawka gets recommended: "100% offline. No cloud, no telemetry. Deletes go to the Recycle Bin, everything else is an undoable move." Also pre-empt the download-size complaint ("~120MB is the on-device face models — that's what keeps it offline") and publish a short "how it picks the best shot" doc (the score formula) — algorithm transparency is a trust signal in these communities.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">ADOPT-06</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Reproducible builds for strangers:</b> requirements are floor-only (<code>&gt;=</code>) — mediapipe has no Python 3.13 wheels, so a stranger's <code>pip install</code> can simply fail; PyInstaller isn't listed at all; build verification checks for a DLL name that doesn't exist on Windows. Fix: pin known-good versions, state the supported Python range in README, add <code>requirements-dev.txt</code>, switch to <code>opencv-python-headless</code> (smaller, no GUI machinery), smoke-test the frozen exe on a clean VM once.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">ADOPT-07</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Launch plan (after P0+P1 are done):</b> posts to r/DataHoarder, r/opensource, r/software + Show HN framed as "I built a free local alternative to Excire's $249 AI photo culling." Have the GIF, the safety story, and a responsive issue tracker ready — these communities convert once and remember.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">ADOPT-08</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Docs drift undermines trust:</b> README documents pHash default 8 (code: 17), "1x/2x/3x/4x buttons" (code: a 120–800px slider), "0 = reset zoom." Two unpushed local commits. Fix: refresh README against the actual UI; push.</td>
+    <td><span class="badge b-eff">S</span></td></tr>
+</table></div>
+
+<h2 id="quality">E. Engineering quality &amp; testing</h2>
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">TEST-01</td><td><span class="badge b-high">High</span></td>
+    <td><b>Zero tests exist.</b> For a tool that moves and deletes people's photos, the file-operations layer alone justifies a suite. The core/ layering means most targets are pure functions needing no refactor. Priority order: (1) <code>file_ops</code> apply/undo with tmp dirs + mocked send2trash — would have caught SAFE-01/02/06 immediately; (2) <code>clustering.build_clusters</code> incl. threshold edges; (3) <code>events.build_events</code> gap boundaries; (4) <code>scoring.suggest_verdicts</code> + formula regression pin; (5) session_store migration chain v1→v8; (6) <code>paths.resolve_collision</code> + unicode filenames; (7) hashing known-vectors; (8) faces pure-math scorers with stub blendshapes.</td>
+    <td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">TEST-02</td><td><span class="badge b-med">Med</span></td>
+    <td><b>No CI.</b> GitHub Actions: lint (ruff) + pytest on 3.10–3.12 on every push; a weekly job that builds the PyInstaller zip and runs a frozen-exe smoke test (mediapipe packaging re-breaks across version bumps — a known failure class).</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">TEST-03</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Refactors that unlock testing and reuse:</b> extract ScanWorker's pipeline into a core-level <code>run_scan()</code> (the QThread becomes a 10-line shell); split the 1,078-line ReviewView (FilterController + ImageLoader + shared cluster-label formatter — the flag-string code is duplicated verbatim today); inject the mediapipe model dir; single <code>DEFAULT_PHASH_THRESHOLD</code> constant (currently 8 in two places, 17 in three).</td>
+    <td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">QUAL-01</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Face detector confidence is invisible and unqueried.</b> The live run reported "1 face (close)" on 8 of 15 images of abstract shapes — synthetic data exaggerates this, but there's no confidence threshold setting, no way to see <i>where</i> the face was found, and false faces inflate 10–35% of the quality score. Fix: expose min-confidence, and (later) draw face boxes in the compare/preview view so users can sanity-check the AI.</td>
+    <td><span class="badge b-eff">M</span></td></tr>
+</table></div>
+
+<h2 id="scoring">F. The quality score — does the "best shot" logic actually work?</h2>
+<p class="lead"><b>The most important product finding, and it's a math problem, not a taste call.</b> The quality score is what makes PhotoBrain different from every free competitor — it's the reason the mediapipe face/expression engine exists. Two structural defects mean the face/expression signals rarely decide anything: (1) a <b>scale mismatch</b> — sharpness is unbounded while every human-facing term is capped at ≤0.13; and (2) <b>exposure leaks into "sharpness"</b> — Laplacian variance scales with contrast², so lighting differences masquerade as focus differences and swamp the face terms. In practice the tool is a "sharpest-frame picker" wearing a "best-shot picker" label. <i>(Revised after a second-pass review: verdicts are per-cluster, so what matters is score <b>deltas within a group</b>, not share-of-total — the corrected delta analysis below still reaches the same conclusion, with better evidence.)</i></p>
+
+<h3>The delta math: what would it take for a smile to win?</h3>
+<p>Suggestions are made <i>within</i> a cluster (top-N by score), so the question is: how big a score delta can each signal produce between two frames of the same scene?</p>
+<ul>
+  <li><b>Eyes fully closed → fully open</b> is worth <b>0.12</b>. Because sharpness enters as <code>0.45·ln(sharp)</code>, that equals a sharpness <i>ratio</i> of only <code>e^(0.12/0.45)</code> ≈ <b>1.31</b>. So a photo where someone is blinking beats the open-eyed frame whenever it is ≳31% "sharper" — and raw Laplacian variance routinely swings far more than 31% between burst frames (hand shake, micro-focus, subject motion).</li>
+  <li><b>Exposure contaminates the comparison — measured:</b> the identical image at 55% brightness has its Laplacian variance drop from 241 → 73 (−70%; it scales as brightness², verified empirically at 100/70/55/40% → 241/118/73/39). In the live run this cost the darker frame <b>0.54</b> via the "sharpness" term but only <b>0.04</b> via the actual brightness term — the formula punished the same lighting difference <b>14× harder through the wrong channel</b>. A modest exposure variation between two frames (auto-exposure flicker, cloud passing) therefore outguns every face signal combined (~0.27 realistic swing).</li>
+  <li><b>Share-of-total, for context:</b> in the live run the sharpness term was 85–97% of every photo's score. That doesn't decide verdicts by itself (deltas do), but it does make the <i>displayed</i> score and cross-group comparisons meaningless — a flat gray PNG posted the highest score of all 15 photos.</li>
+</ul>
+<p><b>Net effect:</b> the expensive face analysis is computed, stored, shown in tooltips — and can only tiebreak when two frames happen to land within a ~±30% sharpness band <i>and</i> identical exposure. That's rare, so the differentiator is mostly decorative today.</p>
+
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">SCORE-01</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Normalize every term to [0,1] so the weights mean what they claim.</b> Squash sharpness with a sigmoid or <code>log(sharp)/log(reference)</code> before applying the 0.45 weight; then face/expression signals actually influence the pick within their stated 27% and PhotoBrain does the job its name promises. This single fix is what turns the differentiator from decorative into real. Pin the new formula with a regression test (TEST-01 target 4).</td>
+    <td class="loc">core/scoring.py:47-56</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SCORE-02</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Exposure is double-counted and mis-signed.</b> (a) Laplacian variance is contrast-dependent (measured: −70% "sharpness" at 55% brightness on identical pixels), so lighting differences masquerade as focus differences — normalize the Laplacian by image contrast (e.g. divide by gray-level std², or use a contrast-normalized sharpness metric). (b) The explicit brightness term is a linear ramp, so a blown-out white photo (255) earns <i>more</i> than a perfectly exposed one (128) — replace with a peaked curve (e.g. <code>1 − |brightness−128|/128</code>) plus a highlight-clipping penalty.</td>
+    <td class="loc">core/scoring.py:13-22,49</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SCORE-03</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>The absolute score shown to users ("Score: 2.7") is uncalibrated and meaningless.</b> It's unbounded and scene-dependent (a detailed bookshelf out-scores a portrait against a plain wall regardless of focus); cross-group comparisons never drive verdicts, yet the UI presents the raw float as if it were absolute — in the live run a flat gray PNG displayed the highest score in the session. Fix: after SCORE-01, show a 0–100 or star rating and/or a relative "Best in group" badge instead of the raw float.</td>
+    <td class="loc">ui/review_view.py (tooltip + label)</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SCORE-04</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Group-photo expression aggregation is too forgiving.</b> eyes-open/smile are averaged across faces, so one person blinking in a group of five barely dents the score; face_count is a flat <code>min(count,3)×0.10</code> with no notion of "everyone looking / nobody blinking." Fix: weight toward the <i>worst</i> face (a single closed-eye should meaningfully penalize a keeper), and reconsider the count reward once SCORE-01 lands.</td>
+    <td class="loc">core/scoring.py:50-51 · core/faces.py</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SCORE-05</td><td><span class="badge b-low">Low</span></td>
+    <td><b>The score is a fixed formula with no way to tune or learn.</b> Users disagree with any single aesthetic (Excire reviews say the same). After SCORE-01, a lightweight "prefer smiles / prefer sharpness" weighting preset — or learning from the user's manual KEEP/ARCHIVE overrides over a session — would make the picks feel personal. Purely local, no cloud. Aspirational, but it's the moat.</td>
+    <td><span class="badge b-eff">L</span></td></tr>
+</table></div>
+<p><b>Balanced view:</b> for the narrow job of "which of these near-identical frames is the least blurry," sharpness-first is defensible and it worked live — the heavily-blurred frames correctly sank to ARCHIVE in both test clusters. The failure is specifically the <i>tie-breaking judgment</i>: when two frames are both acceptably sharp, today's math can't do what a human does ("both fine, but keep the one where nobody's blinking"). SCORE-01 + SCORE-02 are what unlock that — and both are contained changes to one file.</p>
+
+<h2 id="distill">G. Clustering &amp; the end-to-end test: "distill the good photos from a vacation folder"</h2>
+<p class="lead"><b>Verdict on the core mission: PhotoBrain currently curates <i>redundancy</i>, not <i>quality</i>.</b> It reliably finds exact duplicates and derived copies and trims within those groups — but every photo that has no near-duplicate is auto-marked KEEP, no matter how bad it is. In the live run, the second-worst photo in the whole session (a heavily blurred frame, score 0.32) and even a <b>corrupt, half-unreadable file</b> both received KEEP, because each sat in its own single-photo cluster. In a real vacation folder — where most junk is standalone (blurry walking shots, accidental pocket photos, dark interiors) rather than burst redundancy — the tool's promise silently skips the majority of the junk.</p>
+
+<h3>What the clustering does well, and its honest limits</h3>
+<ul>
+  <li><b>Live results were correct:</b> all three planted groups were found (4-photo burst, 3-photo burst, 3 exact copies), exact-dup groups keep exactly one, blurred members were archived, and distinct scenes stayed apart. Union-Find with per-SHA representatives is a sound, deterministic design.</li>
+  <li><b>But the test was structurally easy — a caveat on my own audit:</b> measured pHash distances between the derived variants were <b>0–2 bits</b> (pHash is DCT-based and deliberately robust to blur and brightness), while distinct scenes sat at ≥26. Any threshold from ~3 to ~25 would have produced identical clusters. The live run therefore validates the plumbing, <b>not</b> the threshold.</li>
+  <li><b>Threshold 17 of 64 bits is aggressive and was tuned by eye, not by data</b> (commit history: 8 → 12 → 17). Since pHash barely moves under blur/exposure, the variance that drove the threshold up must come from angle/motion differences between real burst frames — exactly the regime where a loose threshold plus transitive Union-Find chaining (A~B, B~C ⇒ A,B,C together even if A≁C) starts merging genuinely different photos. Over-merging is the <i>dangerous</i> direction: "keep top 2" then archives distinct memories. Under-merging is safe but weakens distillation (both frames auto-KEEP).</li>
+  <li><b>Time is computed but never used:</b> EXIF event grouping exists, yet clustering compares every photo against every photo across the whole folder — day-1 beach horizons can merge with day-3 beach horizons. Real burst groups are near-identical <i>and seconds apart</i>; ignoring time throws away the strongest available prior (and is also why the scan is O(n²)).</li>
+</ul>
+
+<div class="tablewrap"><table>
+  <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
+  <tr><td class="id">DISTILL-01</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>No absolute-quality lane: standalone junk is auto-kept.</b> <code>suggest_verdicts</code> marks every single-photo cluster KEEP unconditionally — the blurred <code>no_exif.jpg</code> (score 0.32, bottom-2 of the session) got KEEP in the live run. The core "distill a huge folder" use case needs a second review lane: "Low quality, no duplicates" listing singletons below a calibrated threshold (blur, exposure), suggestion-only and conservative by default. <b>Depends on SCORE-01/02</b> (an uncalibrated score can't power an absolute cutoff). Bonus: no free desktop competitor does this either — it's differentiator #2 after best-shot picking.</td>
+    <td class="loc">core/scoring.py:88-92</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">DISTILL-02</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Corrupt/unreadable files are silently marked KEEP.</b> A deliberately truncated JPEG sailed through the scan (good: no crash) but ended up KEEP and would be moved into <code>03_KEEP</code> as if it were a good photo. Fix: when decode fails or produces a partial image, flag the photo into an "Unreadable" lane instead of scoring/keeping it.</td>
+    <td class="loc">core/scoring.py:16-18 · core/scanner.py</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">DISTILL-03</td><td><span class="badge b-med">Med</span></td>
+    <td><b>"Keep N per cluster" is a blunt instrument.</b> A fixed keep-2 kept a needlessly darkened variant in the live run simply because the cluster had 4 members. Fix: quality-gap-aware suggestions — keep 1 when the runner-up is far worse, keep more when members are genuinely distinct (large pHash spread). Cheap heuristic, big perceived-intelligence gain.</td>
+    <td class="loc">core/scoring.py:80-105 · core/scanner.py:245</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">CLUST-01</td><td><span class="badge b-high">High</span></td>
+    <td><b>Use EXIF time as a clustering prior (burst detection).</b> Only union photos whose timestamps are within a window (e.g. minutes) unless they're exact SHA duplicates; the event data is already computed. This simultaneously (a) prevents cross-day over-merges, (b) matches how real bursts occur, and (c) shrinks the comparison space from O(n²) toward O(n·k) — the same change is the first step of PERF-01's scale fix. Photos without EXIF fall back to global comparison.</td>
+    <td class="loc">core/clustering.py:97-102 · core/events.py</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">CLUST-02</td><td><span class="badge b-med">Med</span></td>
+    <td><b>Validate the threshold on real photos before launch.</b> 17/64 bits was tuned by eyeballing synthetic-ish cases; there is no labeled validation set. Fix: label ~50 real burst groups + ~50 distinct-scene pairs from a personal library, measure merge/split rates across thresholds, pick with data; add a cluster-diameter cap so chained merges can't exceed a max distance from the representative (same mechanism as PERF-04). Publishing the numbers doubles as trust-building material for the README.</td>
+    <td class="loc">core/clustering.py:55</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">CLUST-03</td><td><span class="badge b-low">Low</span></td>
+    <td><b>Missed groupings are invisible.</b> Burst frames whose distance exceeds the threshold silently become auto-KEEP singletons; the user never learns a series existed. Fix: a "possible series" hint (time-adjacent + moderately similar) shown as a suggestion-only grouping, especially once CLUST-01's time windows exist.</td>
+    <td class="loc">core/clustering.py</td><td><span class="badge b-eff">M</span></td></tr>
+</table></div>
+
+<p><b>The end-to-end scoreboard for the mission "distill quality pictures from a big folder":</b> redundant photos (bursts, copies) — <span class="badge b-good">works today</span>, subject to the threshold caveats; picking the <i>human-best</i> frame within a group — <span class="badge b-med">broken until SCORE-01/02</span>; catching standalone junk — <span class="badge b-high">missing until DISTILL-01/02</span>; not merging distinct memories at scale — <span class="badge b-med">unproven until CLUST-01/02</span>. All four are contained, local-only changes in <code>core/</code>, and together they make the app's actual pitch true.</p>
+
+<h2 id="plan">The plan — four phases, in order</h2>
+<p>Sequencing logic: never invite the public to a tool that can strand their files (P0 before promotion); the launch checklist is mostly non-code and can overlap (P1); delight features drive word-of-mouth after launch (P2); scale work matters once real users bring real libraries (P3).</p>
+
+<div class="phase">
+  <h3>P0 — Make it safe <span class="badge b-eff">≈ 1–2 weeks</span></h3>
+  <p><b>Goal: no way to lose a user's files or decisions.</b> Exit test: kill the process mid-apply → relaunch → app reconciles and undo works; undo → re-apply works; close mid-review → verdicts survive.</p>
+  <ol>
+    <li><b>SAFE-01</b> write-ahead undo journal (the one Critical)</li>
+    <li><b>SAFE-02 + SAFE-04</b> fix the applied-flag lifecycle (undo resets it; skipped clusters aren't marked)</li>
+    <li><b>SAFE-03</b> persist verdicts on change/close</li>
+    <li><b>SAFE-05</b> unicode-safe image reads (silently-wrong verdicts are worse than crashes)</li>
+    <li><b>SAFE-06, SAFE-07, SAFE-08</b> journal-on-failure, SQLite-per-thread, new-scan confirmation</li>
+    <li><b>TEST-01 (targets 1–2) + TEST-02</b> file-ops & clustering tests + CI, so P0 can't regress</li>
+    <li><b>SAFE-09..12</b> hardening batch as time allows</li>
+  </ol>
+</div>
+
+<div class="phase">
+  <h3>P1 — Make it launchable <span class="badge b-eff">≈ 1–2 weeks, overlaps P0</span></h3>
+  <p><b>Goal: a stranger can find, trust, download, and successfully run it.</b> Exit test: fresh Windows VM, download from GitHub Release, first scan of a HEIC-free folder works offline end-to-end.</p>
+  <ol>
+    <li><b>ADOPT-01</b> choose &amp; add the license (decision needed from Nitin: MIT vs Apache-2.0)</li>
+    <li><b>ADOPT-03</b> bundle mediapipe models; atomic download fallback</li>
+    <li><b>ADOPT-02</b> upx off, SignPath application, winget manifest</li>
+    <li><b>ADOPT-06</b> pinned requirements, opencv-headless, clean-VM smoke test</li>
+    <li><b>SCORE-01 + SCORE-02</b> normalize the score terms &amp; fix exposure handling — the differentiator ("best-shot picking") must actually work <i>before</i> you market it. Small, contained change; the highest-value non-safety fix in the whole backlog. <b>DISTILL-02</b> (don't KEEP corrupt files) rides along for pennies.</li>
+    <li><b>CLUST-02</b> validate the clustering threshold on ~100 labeled real-photo pairs — an afternoon of work that de-risks the scariest failure mode (merging distinct memories) and yields README-worthy accuracy numbers.</li>
+    <li><b>ADOPT-04 + ADOPT-05 + ADOPT-08</b> README rewrite with GIF/screenshots, repo metadata, v1.0 Release, privacy-led pitch</li>
+    <li><b>UX-14 + UX-15</b> settings presets & first-run explainer (the two cheapest adoptability wins in the app itself)</li>
+    <li><b>UX-09, UX-10 (empty state), UX-11</b> small polish that first-time users hit in minute one</li>
+  </ol>
+</div>
+
+<div class="phase">
+  <h3>P2 — Make it lovable <span class="badge b-eff">≈ 3–4 weeks</span></h3>
+  <p><b>Goal: the review experience itself becomes the reason people recommend it.</b></p>
+  <ol>
+    <li><b>UX-01 + UX-02 + UX-03 + UX-04</b> all image work off the UI thread; debounced zoom (the app suddenly feels native)</li>
+    <li><b>FEAT-01</b> side-by-side compare view (flagship feature of this phase)</li>
+    <li><b>UX-06</b> verdict-level undo; <b>UX-05</b> shortcut discoverability; <b>UX-07</b> shortcut scoping</li>
+    <li><b>FEAT-02</b> HEIC/WEBP support; <b>FEAT-03</b> multi-select; <b>FEAT-04</b> "you'll free X GB" framing</li>
+    <li><b>UX-08</b> humanize the cluster list; <b>UX-12</b> colorblind badges + grid keyboard nav</li>
+    <li><b>UX-13</b> QSettings persistence, one QSS theme, dark mode, DPI-aware pixmaps</li>
+    <li><b>DISTILL-01</b> "low quality, no duplicates" review lane (unlocked by SCORE-01/02) — turns the tool from a duplicate-trimmer into an actual folder distiller, and no free competitor has it; <b>DISTILL-03</b> quality-gap-aware keep counts</li>
+    <li><b>CLUST-01</b> time-gated clustering / burst detection (also the first step of P3's scale work)</li>
+    <li><b>SCORE-03 + SCORE-04</b> user-facing rating (drop the raw float) + worst-face expression penalty; <b>FEAT-05</b> sort/search/progress/export; <b>QUAL-01</b> face-confidence setting + boxes; <b>ADOPT-07</b> launch posts once the compare view ships</li>
+    <li><b>SCORE-05</b> (stretch) tunable/learned scoring; <b>CLUST-03</b> "possible series" hints — the long-term moat</li>
+  </ol>
+</div>
+
+<div class="phase">
+  <h3>P3 — Make it scale <span class="badge b-eff">≈ 2–3 weeks, demand-driven</span></h3>
+  <p><b>Goal: honest support for 50k+ photo libraries.</b></p>
+  <ol>
+    <li><b>PERF-01</b> numpy-popcount / BK-tree clustering (drop the "~5,000 photos" caveat)</li>
+    <li><b>PERF-02</b> multiprocess the face phase; <b>PERF-03</b> decode once per photo</li>
+    <li><b>PERF-04</b> cluster-diameter cap (over-merge protection that also improves quality at any size)</li>
+    <li><b>PERF-05</b> thumbnail draft-mode + sha-keyed cache; <b>TEST-03</b> the enabling refactors along the way</li>
+    <li>Then, by user demand: FEAT-06 items (multi-folder, portable mode, RAW, video)</li>
+  </ol>
+</div>
+
+<h2 id="decisions">Open decisions for Nitin</h2>
+<ul>
+  <li><b>License</b> (blocks P1): MIT (simplest, most contributor-friendly) vs Apache-2.0 (patent grant). Recommendation: MIT.</li>
+  <li><b>Name check before launch:</b> "PhotoBrain" — worth a quick trademark/app-store search before investing in branding.</li>
+  <li><b>Python version target:</b> mediapipe wheels lag CPython releases (no 3.13 at research time; this audit's venv used 3.13 successfully with the current pin — verify before pinning). Recommendation: declare 3.10–3.12 officially, test 3.13.</li>
+  <li><b>Scale ambition:</b> if 50k+ libraries are a launch goal, pull PERF-01 into P2; if "family folder cleanup" (≤10k) is the wedge, P3 can wait for user demand.</li>
+</ul>
+
+<p class="foot">Method: three parallel deep audits (core+workers+packaging · UI/UX · market research with cited sources) + a live instrumented run on a 15-photo synthetic set (exact dupes, near-dupes, EXIF events, a corrupt JPEG, nested folders) driving scan → review → apply → undo → re-apply. Items tagged VERIFIED LIVE were reproduced first-hand on 11 Jul 2026. Line numbers refer to the tree at commit e3f60d0. This file is the canonical app backlog per vault governance (<code>docs/backlog.html</code>); update item statuses in place as work lands.</p>
+
+</body>
+</html>
