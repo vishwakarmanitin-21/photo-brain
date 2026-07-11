@@ -484,6 +484,28 @@ class SessionStore:
 
     # ── Apply Log ────────────────────────────────────────
 
+    def insert_apply_log_entry(
+        self, session_id: str, entry: ApplyLogEntry,
+    ) -> int:
+        """Durably journal one planned file operation and return its row id."""
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """INSERT INTO apply_log
+                   (session_id, photo_id, original_path, destination_path,
+                    verdict, dup_type, destination_folder, cluster_id, timestamp)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (session_id, entry.photo_id, entry.original_path,
+                 entry.destination_path, entry.verdict, entry.dup_type,
+                 entry.destination_folder, entry.cluster_id, entry.timestamp),
+            )
+        entry.db_id = cursor.lastrowid
+        return cursor.lastrowid
+
+    def delete_apply_log_entry(self, entry_id: int):
+        """Remove a journal plan when its filesystem operation did not occur."""
+        self._conn.execute("DELETE FROM apply_log WHERE id=?", (entry_id,))
+        self._conn.commit()
+
     def insert_apply_log_batch(self, session_id: str, entries: list[ApplyLogEntry]):
         with self._transaction() as conn:
             conn.executemany(
@@ -514,6 +536,7 @@ class SessionStore:
                 destination_folder=r["destination_folder"],
                 cluster_id=r["cluster_id"],
                 timestamp=r["timestamp"],
+                db_id=r["id"],
             )
             for r in rows
         ]

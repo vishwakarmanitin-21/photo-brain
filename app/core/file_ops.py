@@ -49,6 +49,7 @@ class FileOperator:
             if photo.verdict == Verdict.REVIEW:
                 continue  # Skip undecided
 
+            entry = None
             try:
                 # Normalize path separators — send2trash uses \\?\ prefix
                 # on Windows which requires pure backslashes
@@ -60,9 +61,7 @@ class FileOperator:
                     continue
 
                 if photo.verdict == Verdict.DELETE:
-                    # Permanent delete — send to Recycle Bin
-                    send2trash(filepath)
-                    entries.append(ApplyLogEntry(
+                    entry = ApplyLogEntry(
                         photo_id=photo.id,
                         original_path=filepath,
                         destination_path="[RECYCLE BIN]",
@@ -71,7 +70,7 @@ class FileOperator:
                         destination_folder="[RECYCLE BIN]",
                         cluster_id=photo.cluster_id or "",
                         timestamp=now,
-                    ))
+                    )
                 else:
                     # KEEP or ARCHIVE — move to destination folder
                     dest_folder_name = self._get_dest_folder(photo)
@@ -79,9 +78,7 @@ class FileOperator:
                     dest_path = os.path.join(dest_dir, photo.filename)
                     dest_path = resolve_collision(dest_path)
 
-                    shutil.move(filepath, dest_path)
-
-                    entries.append(ApplyLogEntry(
+                    entry = ApplyLogEntry(
                         photo_id=photo.id,
                         original_path=filepath,
                         destination_path=dest_path,
@@ -90,18 +87,49 @@ class FileOperator:
                         destination_folder=dest_folder_name,
                         cluster_id=photo.cluster_id or "",
                         timestamp=now,
-                    ))
+                    )
 
+                # Commit the undo plan before mutating the filesystem. If the
+                # process dies after this point, recovery still has a record.
+                entry.db_id = self.store.insert_apply_log_entry(
+                    self.session_id, entry,
+                )
+
+                if photo.verdict == Verdict.DELETE:
+                    # Permanent delete — send to Recycle Bin
+                    send2trash(filepath)
+                else:
+                    shutil.move(filepath, entry.destination_path)
+
+                entries.append(entry)
                 processed += 1
 
             except Exception as e:
                 log.error("Failed to process %s: %s", photo.filepath, e)
+                # Remove the plan only when the source still proves no
+                # destructive mutation completed. Some filesystem APIs can
+                # raise after doing part (or all) of the requested operation;
+                # in that ambiguous case the recovery record must survive.
+                if entry is not None and entry.db_id is not None:
+                    if os.path.exists(entry.original_path):
+                        try:
+                            self.store.delete_apply_log_entry(entry.db_id)
+                        except Exception:
+                            log.exception(
+                                "Failed to remove unused journal entry %s",
+                                entry.db_id,
+                            )
+                    else:
+                        log.warning(
+                            "Retaining journal entry %s after ambiguous failure",
+                            entry.db_id,
+                        )
                 errors += 1
 
-        # Write logs
+        # CSV/JSON are human-readable end-of-run summaries. SQLite above is
+        # the crash-safe undo journal and is committed before every mutation.
         if entries:
             self._write_logs(entries, now)
-            self.store.insert_apply_log_batch(self.session_id, entries)
 
         log.info("Apply complete: %d processed, %d errors", processed, errors)
         return processed, errors

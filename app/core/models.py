@@ -108,3 +108,4 @@ class ApplyLogEntry:
     destination_folder: str
     cluster_id: str
     timestamp: str
+    db_id: Optional[int] = None  # apply_log rowid; set when journaled/loaded
