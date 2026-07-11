@@ -67,6 +67,44 @@
            border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 14px 0; }
   .phase h3 { margin: 0 0 6px; }
   .tablewrap { overflow-x: auto; }
+  [hidden] { display: none !important; }
+  .filter-panel { position: sticky; top: 0; z-index: 20; margin: 24px 0 10px;
+                  padding: 14px; background: var(--card); border: 1px solid var(--line);
+                  border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, .08); }
+  .filter-panel h2 { margin: 0 0 10px; padding: 0; border: 0; font-size: 17px; }
+  .filter-grid { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(120px, 1fr)) auto;
+                 gap: 10px; align-items: end; }
+  .filter-field { display: grid; gap: 4px; min-width: 0; }
+  .filter-field label { color: var(--muted); font-size: 11px; font-weight: 700;
+                        letter-spacing: .04em; text-transform: uppercase; }
+  .filter-field input, .filter-field select, .filter-clear {
+    width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 9px; background: var(--bg); color: var(--fg); font: inherit;
+  }
+  .filter-field input:focus, .filter-field select:focus, .filter-clear:focus {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .filter-clear { width: auto; cursor: pointer; color: var(--accent); font-weight: 600; }
+  .filter-clear:hover { background: var(--accent-soft); }
+  .filter-clear:disabled { cursor: default; color: var(--muted); opacity: .55; }
+  .filter-summary { display: flex; justify-content: space-between; gap: 12px;
+                    margin-top: 10px; color: var(--muted); font-size: 13px; }
+  .filter-tip { text-align: right; }
+  .no-results { margin: 14px 0 24px; padding: 14px 18px; border: 1px dashed var(--line);
+                border-radius: 9px; color: var(--muted); text-align: center; }
+  @media (max-width: 900px) {
+    .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .filter-search { grid-column: 1 / -1; }
+    .filter-clear { width: 100%; }
+  }
+  @media (max-width: 600px) {
+    body { padding: 22px 14px 72px; }
+    .filter-panel { position: static; }
+    .filter-grid { grid-template-columns: 1fr; }
+    .filter-search { grid-column: auto; }
+    .filter-summary { display: block; }
+    .filter-tip { margin-top: 3px; text-align: left; }
+  }
   code { font-family: Consolas, monospace; font-size: 13px; background: var(--card);
          border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .foot { margin-top: 48px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 14px; }
@@ -78,6 +116,50 @@
 <p class="sub">Produced 11 Jul 2026 · full code audit (all ~4,900 lines) + live run of the app through scan → review → apply → undo + market research on competitors and distribution. Updated as implementation lands; green <b>SHIPPED</b> badges are verified completed work.</p>
 
 <p class="lead"><b>The one-paragraph verdict:</b> PhotoBrain's engine is genuinely good — clean architecture, a working end-to-end pipeline, and a feature (face/expression-aware "best shot" picking) that <b>no free Windows tool offers today</b>. The gap between here and a tool strangers love is not missing features; it's (1) a small set of data-safety bugs that could lose a user's decisions or files, (2) a scoring formula whose face/expression intelligence is mathematically drowned out — so the headline differentiator doesn't actually decide picks yet (§F) — and a curation flow that auto-keeps all standalone junk (§G), (3) a distribution story that currently ends at a SmartScreen warning and a "Private — all rights reserved" license on a public repo, and (4) first-ten-minutes polish. Fix safety first, then make the core promise true, then launch-readiness, then delight, then scale.</p>
+
+<section class="filter-panel" id="backlog-filters" aria-labelledby="filter-heading" hidden>
+  <h2 id="filter-heading">Filter backlog items</h2>
+  <div class="filter-grid">
+    <div class="filter-field filter-search">
+      <label for="filter-search">Search</label>
+      <input id="filter-search" type="search" placeholder="ID, words, or file path…" autocomplete="off">
+    </div>
+    <div class="filter-field">
+      <label for="filter-category">Category</label>
+      <select id="filter-category"><option value="">All categories</option></select>
+    </div>
+    <div class="filter-field">
+      <label for="filter-priority">Priority</label>
+      <select id="filter-priority">
+        <option value="">All priorities</option>
+        <option value="blocker">Blocker</option><option value="critical">Critical</option>
+        <option value="high">High</option><option value="med">Medium</option>
+        <option value="low">Low</option><option value="later">Later</option>
+      </select>
+    </div>
+    <div class="filter-field">
+      <label for="filter-status">Status</label>
+      <select id="filter-status">
+        <option value="">All statuses</option><option value="open">Open</option>
+        <option value="in-progress">In progress</option><option value="shipped">Shipped</option>
+      </select>
+    </div>
+    <div class="filter-field">
+      <label for="filter-effort">Effort</label>
+      <select id="filter-effort">
+        <option value="">All efforts</option><option value="s">S</option>
+        <option value="m">M</option><option value="m→l">M→L</option>
+        <option value="l">L</option><option value="xl">XL</option>
+      </select>
+    </div>
+    <button class="filter-clear" id="filter-clear" type="button" disabled>Clear</button>
+  </div>
+  <div class="filter-summary">
+    <span id="filter-count" aria-live="polite"></span>
+    <span class="filter-tip">Tip: press <b>/</b> to search</span>
+  </div>
+</section>
+<p class="no-results" id="filter-empty" hidden>No backlog items match these filters. Clear a filter and try again.</p>
 
 <h2 id="scorecard">Scorecard</h2>
 <div class="cards">
@@ -430,6 +512,110 @@
 </ul>
 
 <p class="foot">Method: three parallel deep audits (core+workers+packaging · UI/UX · market research with cited sources) + a live instrumented run on a 15-photo synthetic set (exact dupes, near-dupes, EXIF events, a corrupt JPEG, nested folders) driving scan → review → apply → undo → re-apply. Items tagged VERIFIED LIVE were reproduced first-hand on 11 Jul 2026. Line numbers refer to the tree at commit e3f60d0. This file is the canonical app backlog per vault governance (<code>docs/backlog.html</code>); update item statuses in place as work lands.</p>
+
+<script>
+(() => {
+  const rows = [...document.querySelectorAll('tr')].filter(row => row.querySelector('td.id'));
+  if (!rows.length) return;
+
+  const controls = {
+    search: document.querySelector('#filter-search'),
+    category: document.querySelector('#filter-category'),
+    priority: document.querySelector('#filter-priority'),
+    status: document.querySelector('#filter-status'),
+    effort: document.querySelector('#filter-effort'),
+  };
+  const panel = document.querySelector('#backlog-filters');
+  const clearButton = document.querySelector('#filter-clear');
+  const count = document.querySelector('#filter-count');
+  const empty = document.querySelector('#filter-empty');
+  const categoryNames = {
+    SAFE: 'Safety', UX: 'UX & UI', FEAT: 'Features', PERF: 'Performance',
+    ADOPT: 'Adoption', TEST: 'Testing', QUAL: 'Quality', SCORE: 'Scoring',
+    DISTILL: 'Distillation', CLUST: 'Clustering',
+  };
+
+  const items = rows.map(row => {
+    const id = row.querySelector('.id').textContent.trim();
+    const priorityBadge = row.cells[1]?.querySelector('.badge');
+    const effortBadge = row.querySelector('.b-eff');
+    const shipped = Boolean(row.querySelector('.b-ship'));
+    const inProgress = [...row.querySelectorAll('.b-good')]
+      .some(badge => badge.textContent.trim().toLowerCase() === 'in progress');
+    return {
+      row,
+      wrapper: row.closest('.tablewrap'),
+      category: id.split('-')[0],
+      priority: priorityBadge?.textContent.trim().toLowerCase() || '',
+      effort: effortBadge?.textContent.trim().toLowerCase() || '',
+      status: shipped ? 'shipped' : (inProgress ? 'in-progress' : 'open'),
+      text: row.textContent.toLowerCase(),
+    };
+  });
+
+  [...new Set(items.map(item => item.category))]
+    .sort((a, b) => (categoryNames[a] || a).localeCompare(categoryNames[b] || b))
+    .forEach(category => {
+      const option = document.createElement('option');
+      option.value = category;
+      option.textContent = categoryNames[category] || category;
+      controls.category.append(option);
+    });
+
+  const wrappers = [...new Set(items.map(item => item.wrapper))];
+
+  function applyFilters() {
+    const selected = {
+      search: controls.search.value.trim().toLowerCase(),
+      category: controls.category.value,
+      priority: controls.priority.value,
+      status: controls.status.value,
+      effort: controls.effort.value,
+    };
+    let visible = 0;
+
+    items.forEach(item => {
+      const statusMatches = !selected.status ||
+        (selected.status === 'open' ? item.status !== 'shipped' : item.status === selected.status);
+      const matches = (!selected.search || item.text.includes(selected.search)) &&
+        (!selected.category || item.category === selected.category) &&
+        (!selected.priority || item.priority === selected.priority) &&
+        statusMatches &&
+        (!selected.effort || item.effort === selected.effort);
+      item.row.hidden = !matches;
+      if (matches) visible += 1;
+    });
+
+    wrappers.forEach(wrapper => {
+      wrapper.hidden = !items.some(item => item.wrapper === wrapper && !item.row.hidden);
+    });
+    const active = Object.values(selected).some(Boolean);
+    clearButton.disabled = !active;
+    count.textContent = `Showing ${visible} of ${items.length} backlog items`;
+    empty.hidden = visible !== 0;
+  }
+
+  Object.values(controls).forEach(control => control.addEventListener('input', applyFilters));
+  clearButton.addEventListener('click', () => {
+    Object.values(controls).forEach(control => { control.value = ''; });
+    applyFilters();
+    controls.search.focus();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === '/' && !/input|select|textarea/i.test(document.activeElement.tagName)) {
+      event.preventDefault();
+      controls.search.focus();
+    }
+    if (event.key === 'Escape' && document.activeElement === controls.search && controls.search.value) {
+      controls.search.value = '';
+      applyFilters();
+    }
+  });
+
+  panel.hidden = false;
+  applyFilters();
+})();
+</script>
 
 </body>
 </html>
