@@ -1,4 +1,5 @@
 """SQLite persistence layer for PhotoBrain sessions."""
+import os
 import sqlite3
 import logging
 import threading
@@ -429,6 +430,14 @@ class SessionStore:
         self._conn.execute(
             "UPDATE photos SET verdict=?, user_override=? WHERE id=?",
             (verdict.value, int(user_override), photo_id),
+        )
+        self._conn.commit()
+
+    def update_photo_path(self, photo_id: str, filepath: str):
+        """Store a photo's current path and its possibly changed filename."""
+        self._conn.execute(
+            "UPDATE photos SET filepath=?, filename=? WHERE id=?",
+            (filepath, os.path.basename(filepath), photo_id),
         )
         self._conn.commit()
 

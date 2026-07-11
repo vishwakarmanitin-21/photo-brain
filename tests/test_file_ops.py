@@ -169,6 +169,59 @@ class FileOperatorJournalTests(unittest.TestCase):
         self.assertTrue(os.path.exists(photo.filepath))
         self.assertEqual([], self.store.get_apply_log(self.session_id))
 
+    def test_apply_and_undo_keep_saved_path_in_sync(self):
+        photo = self._photo()
+        original_path = photo.filepath
+        self.store.insert_photos_batch(self.session_id, [photo])
+
+        processed, errors = self.operator.apply_verdicts([photo])
+
+        self.assertEqual((1, 0), (processed, errors))
+        moved = self.store.get_photos_by_session(self.session_id)[0]
+        self.assertNotEqual(original_path, moved.filepath)
+        self.assertEqual(
+            self.store.get_apply_log(self.session_id)[0].destination_path,
+            moved.filepath,
+        )
+        self.assertTrue(os.path.isfile(moved.filepath))
+
+        restored, skipped = self.operator.undo_last_apply()
+
+        self.assertEqual((1, 0), (restored, skipped))
+        saved = self.store.get_photos_by_session(self.session_id)[0]
+        self.assertEqual(original_path, saved.filepath)
+        self.assertEqual("photo.jpg", saved.filename)
+        self.assertTrue(os.path.isfile(saved.filepath))
+
+    def test_collision_restore_updates_path_and_can_be_reapplied(self):
+        photo = self._photo()
+        original_path = photo.filepath
+        self.store.insert_photos_batch(self.session_id, [photo])
+        self.assertEqual((1, 0), self.operator.apply_verdicts([photo]))
+
+        # Another file takes the old name before Undo. The restored photo must
+        # get a new name rather than replacing this file.
+        with open(original_path, "wb") as handle:
+            handle.write(b"different photo")
+
+        self.assertEqual((1, 0), self.operator.undo_last_apply())
+        restored_photo = self.store.get_photos_by_session(self.session_id)[0]
+        self.assertEqual("photo_1.jpg", restored_photo.filename)
+        self.assertEqual(
+            os.path.join(self.source, "photo_1.jpg"),
+            restored_photo.filepath,
+        )
+        self.assertTrue(os.path.isfile(original_path))
+        self.assertTrue(os.path.isfile(restored_photo.filepath))
+
+        processed, errors = self.operator.apply_verdicts([restored_photo])
+
+        self.assertEqual((1, 0), (processed, errors))
+        reapplied = self.store.get_photos_by_session(self.session_id)[0]
+        self.assertEqual("photo_1.jpg", reapplied.filename)
+        self.assertTrue(os.path.isfile(reapplied.filepath))
+        self.assertTrue(os.path.isfile(original_path))
+
 
 class LastCopyGuardTests(unittest.TestCase):
     @staticmethod

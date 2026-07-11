@@ -132,7 +132,7 @@
   <tr><td class="id">SAFE-09</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Missing "last copy" guard before DELETE.</b> A dead <code>keep_shas</code> lookup shows the intent: warn when the user deletes every copy of a photo with no KEEP survivor. It was never wired in. Fix: implement the warning (or remove the dead code consciously).</td>
     <td class="loc">core/file_ops.py:38-41</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-10</td><td><span class="badge b-med">Med</span></td>
+  <tr><td class="id">SAFE-10</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>DB filepaths never updated after apply/undo moves</b> — collision-renamed restores (<code>name_1.jpg</code>) and re-applies then report "Source file missing." Fix: write back the new path on every successful move.</td>
     <td class="loc">core/file_ops.py:82,215-221</td><td><span class="badge b-eff">M</span></td></tr>
   <tr><td class="id">SAFE-11</td><td><span class="badge b-med">Med</span></td>

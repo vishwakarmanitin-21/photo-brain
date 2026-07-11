@@ -116,6 +116,9 @@ class FileOperator:
                     send2trash(filepath)
                 else:
                     shutil.move(filepath, entry.destination_path)
+                    self.store.update_photo_path(
+                        photo.id, entry.destination_path,
+                    )
 
                 entries.append(entry)
                 if photo.cluster_id:
@@ -265,6 +268,9 @@ class FileOperator:
                         # user already restored it manually: desired state is
                         # satisfied, so this journal row is resolved.
                         log.info("File already at original path: %s", entry.original_path)
+                        self.store.update_photo_path(
+                            entry.photo_id, entry.original_path,
+                        )
                         restored += 1
                         if entry.db_id is not None:
                             resolved_entry_ids.append(entry.db_id)
@@ -286,6 +292,7 @@ class FileOperator:
                     )
 
                 shutil.move(entry.destination_path, restore_path)
+                self.store.update_photo_path(entry.photo_id, restore_path)
                 restored += 1
                 if entry.db_id is not None:
                     resolved_entry_ids.append(entry.db_id)
