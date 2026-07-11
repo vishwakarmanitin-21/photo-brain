@@ -11,3 +11,7 @@ Follow the vault governance: durable knowledge, decisions, research, and non-cod
 ## Project guidance
 
 Use `CLAUDE.md` / `claude.md` in this repo for project-specific architecture, commands, verification rules, and constraints. The global Codex guidance in `C:\Users\Nitin\.codex\AGENTS.md` also applies.
+
+## Communication style
+
+Explain everything to Nitin in plain, simple language. Lead with what changed, why it matters, and what he needs to decide or do. Avoid jargon where possible; when a technical term is necessary, define it briefly in everyday words. Keep technical detail available, but do not make Nitin translate dense engineering language to understand the outcome.
