@@ -27,8 +27,8 @@ def extract_exif_datetime(filepath: str) -> Optional[str]:
     Returns ISO 8601 string or None if no date found.
     """
     try:
-        img = Image.open(filepath)
-        exif = img.getexif()
+        with Image.open(filepath) as img:
+            exif = img.getexif()
         if not exif:
             return None
 

@@ -28,8 +28,11 @@ def compute_sha256(filepath: str) -> Optional[str]:
 
 def compute_phash(filepath: str, hash_size: int = 8) -> Optional[str]:
     try:
-        img = Image.open(filepath)
-        h = imagehash.phash(img, hash_size=hash_size)
+        # Context manager releases the OS file handle immediately; a handle
+        # left open until GC can block the apply-move of this same file on
+        # Windows (sharing violation).
+        with Image.open(filepath) as img:
+            h = imagehash.phash(img, hash_size=hash_size)
         return str(h)
     except Exception as e:
         log.warning("Cannot compute pHash for %s: %s", filepath, e)

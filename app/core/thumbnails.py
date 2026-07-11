@@ -29,10 +29,10 @@ class ThumbnailCache:
         if os.path.isfile(dest):
             return dest
         try:
-            img = Image.open(photo.filepath)
-            img = img.convert("RGB")
-            img.thumbnail(THUMB_SIZE, Image.LANCZOS)
-            img.save(dest, "JPEG", quality=THUMB_QUALITY)
+            with Image.open(photo.filepath) as img:
+                img = img.convert("RGB")
+                img.thumbnail(THUMB_SIZE, Image.LANCZOS)
+                img.save(dest, "JPEG", quality=THUMB_QUALITY)
             return dest
         except Exception as e:
             log.warning("Thumbnail failed for %s: %s", photo.filepath, e)

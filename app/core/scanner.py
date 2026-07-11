@@ -45,11 +45,17 @@ def compute_hashes(
             return photos
 
         sha = compute_sha256(fp)
+        try:
+            # The file can vanish between collection and here (sync clients
+            # dehydrating placeholders) — never abort a whole scan for it.
+            file_size = os.path.getsize(fp)
+        except OSError:
+            file_size = 0
         photo = Photo(
             id=uuid.uuid4().hex[:12],
             filepath=fp,
             filename=os.path.basename(fp),
-            file_size=os.path.getsize(fp) if os.path.exists(fp) else 0,
+            file_size=file_size,
             sha256=sha,
             scan_order=i,
         )
