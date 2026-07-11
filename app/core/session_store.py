@@ -460,6 +460,19 @@ class SessionStore:
         )
         self._conn.commit()
 
+    def update_clusters_review_state(self, clusters: list[Cluster]):
+        """Persist review markers and derived verdict counts in one commit."""
+        with self._transaction() as conn:
+            conn.executemany(
+                """UPDATE clusters
+                   SET keep_count=?, delete_count=?, reviewed=?
+                   WHERE id=?""",
+                [
+                    (c.keep_count, c.delete_count, int(c.reviewed), c.id)
+                    for c in clusters
+                ],
+            )
+
     # ── Events ───────────────────────────────────────────
 
     def insert_events_batch(self, session_id: str, events: list[Event]):

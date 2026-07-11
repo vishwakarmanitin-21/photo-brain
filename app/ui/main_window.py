@@ -5,7 +5,7 @@ import logging
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QMessageBox, QDialog,
 )
-from PySide6.QtCore import Slot
+from PySide6.QtCore import QTimer, Slot
 
 from app.ui.setup_view import SetupView
 from app.ui.scan_view import ScanView
@@ -43,6 +43,11 @@ class MainWindow(QMainWindow):
         self._event_gap_hours = 4.0
         self._face_detection_enabled = True
 
+        self._review_save_timer = QTimer(self)
+        self._review_save_timer.setSingleShot(True)
+        self._review_save_timer.setInterval(400)
+        self._review_save_timer.timeout.connect(self._persist_review_state)
+
         self._build_ui()
         self._connect_signals()
 
@@ -73,6 +78,7 @@ class MainWindow(QMainWindow):
         self.review_view.apply_cluster_requested.connect(self._on_apply_cluster)
         self.review_view.undo_requested.connect(self._on_undo)
         self.review_view.back_requested.connect(self._go_home)
+        self.review_view.review_state_changed.connect(self._schedule_review_save)
 
     # ── Navigation ───────────────────────────────────────
 
@@ -223,6 +229,24 @@ class MainWindow(QMainWindow):
         self.thumb_worker = ThumbWorker(photos, self.thumb_cache)
         self.thumb_worker.thumb_ready.connect(self.review_view.on_thumb_ready)
         self.thumb_worker.start()
+
+    @Slot()
+    def _schedule_review_save(self):
+        """Debounce frequent verdict changes into one SQLite write."""
+        if self.store and self.session_id:
+            self._review_save_timer.start()
+
+    @Slot()
+    def _persist_review_state(self):
+        """Flush verdicts and cluster review markers to SQLite."""
+        if not self.store or not self.session_id:
+            return
+        photos = self.review_view.get_all_photos()
+        if photos:
+            self.store.update_photos_batch(photos)
+        clusters = self.review_view.get_all_clusters()
+        if clusters:
+            self.store.update_clusters_review_state(clusters)
 
     # ── Apply ────────────────────────────────────────────
 
@@ -412,6 +436,13 @@ class MainWindow(QMainWindow):
     # ── Cleanup ──────────────────────────────────────────
 
     def closeEvent(self, event):
+        if self._review_save_timer.isActive():
+            self._review_save_timer.stop()
+        if self.stack.currentIndex() == VIEW_REVIEW:
+            try:
+                self._persist_review_state()
+            except Exception:
+                log.exception("Failed to persist review state during close")
         if self.scan_worker and self.scan_worker.isRunning():
             self.scan_worker.cancel()
             self.scan_worker.wait(3000)

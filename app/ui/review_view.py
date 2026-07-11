@@ -314,6 +314,7 @@ class ReviewView(QWidget):
     apply_cluster_requested = Signal(str)  # cluster_id
     undo_requested = Signal()
     back_requested = Signal()
+    review_state_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -912,8 +913,13 @@ class ReviewView(QWidget):
     @Slot(str, str)
     def _on_thumb_verdict_changed(self, photo_id: str, verdict_value: str):
         """Handle verdict change from individual thumbnail buttons."""
+        for photo in self._current_photos:
+            if photo.id == photo_id:
+                photo.user_override = True
+                break
         self._update_global_counts()
         self._update_cluster_list_item()
+        self.review_state_changed.emit()
 
     def _set_selected_verdict(self, verdict: Verdict):
         if not self._selected_photo_id:
@@ -924,6 +930,7 @@ class ReviewView(QWidget):
             widget.update_verdict(verdict)
             self._update_global_counts()
             self._update_cluster_list_item()
+            self.review_state_changed.emit()
 
     def _mark_keep(self):
         self._set_selected_verdict(Verdict.KEEP)
@@ -959,6 +966,7 @@ class ReviewView(QWidget):
                 widget.update_verdict(verdict)
         self._update_global_counts()
         self._update_cluster_list_item()
+        self.review_state_changed.emit()
 
     def _keep_top_n(self, n: int):
         photos = self._get_current_photos()
@@ -972,6 +980,7 @@ class ReviewView(QWidget):
                 widget.update_verdict(verdict)
         self._update_global_counts()
         self._update_cluster_list_item()
+        self.review_state_changed.emit()
 
     def _delete_rest(self):
         photos = self._get_current_photos()
@@ -984,12 +993,14 @@ class ReviewView(QWidget):
                     widget.update_verdict(Verdict.DELETE)
         self._update_global_counts()
         self._update_cluster_list_item()
+        self.review_state_changed.emit()
 
     def _mark_reviewed(self):
         if 0 <= self._current_cluster_idx < len(self._clusters):
             cluster = self._clusters[self._current_cluster_idx]
             cluster.reviewed = True
             self._update_cluster_list_item()
+            self.review_state_changed.emit()
             self._next_cluster()
 
     def _apply_cluster(self):
@@ -1076,3 +1087,7 @@ class ReviewView(QWidget):
         for photos in self._cluster_photos.values():
             result.extend(photos)
         return result
+
+    def get_all_clusters(self) -> list[Cluster]:
+        """Return review-state clusters for persistence."""
+        return list(self._all_clusters)
