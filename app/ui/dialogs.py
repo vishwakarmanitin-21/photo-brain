@@ -108,7 +108,8 @@ class SettingsDialog(QDialog):
 
 class ApplyConfirmDialog(QDialog):
     def __init__(
-        self, keep: int, archive: int, delete: int, review: int, parent=None
+        self, keep: int, archive: int, delete: int, review: int, parent=None,
+        last_copy_delete_count: int = 0,
     ):
         super().__init__(parent)
         self.setWindowTitle("Apply Changes")
@@ -134,7 +135,8 @@ class ApplyConfirmDialog(QDialog):
 
         if delete > 0:
             delete_label = QLabel(
-                f"  {delete} files will be permanently deleted (sent to Recycle Bin)"
+                f"  {delete} files will be sent to the Recycle Bin "
+                "(not undoable in PhotoBrain)"
             )
             delete_label.setStyleSheet("font-size: 13px; color: #F44336; font-weight: bold;")
             layout.addWidget(delete_label)
@@ -145,6 +147,22 @@ class ApplyConfirmDialog(QDialog):
             layout.addWidget(review_label)
 
         layout.addSpacing(10)
+
+        if last_copy_delete_count > 0:
+            noun = "file" if last_copy_delete_count == 1 else "files"
+            last_copy_warning = QLabel(
+                f"Last-copy warning: {last_copy_delete_count} {noun} belong "
+                "to photos whose every scanned byte-for-byte copy is marked "
+                "DELETE. No scanned copy will remain outside the Recycle Bin."
+            )
+            last_copy_warning.setWordWrap(True)
+            last_copy_warning.setStyleSheet(
+                "font-size: 12px; color: #B71C1C; font-weight: bold; "
+                "padding: 8px; background-color: #FFCDD2; "
+                "border: 1px solid #EF5350; border-radius: 4px;"
+            )
+            layout.addWidget(last_copy_warning)
+            layout.addSpacing(6)
 
         if delete > 0:
             warning = QLabel(

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.core.file_ops import FileOperator
+from app.core.file_ops import FileOperator, find_last_copy_deletions
 from app.core.models import DupType, Photo, Verdict
 from app.core.session_store import SessionStore
 
@@ -168,6 +168,45 @@ class FileOperatorJournalTests(unittest.TestCase):
         self.assertEqual((1, 0), (restored, skipped))
         self.assertTrue(os.path.exists(photo.filepath))
         self.assertEqual([], self.store.get_apply_log(self.session_id))
+
+
+class LastCopyGuardTests(unittest.TestCase):
+    @staticmethod
+    def _photo(photo_id, sha256, verdict):
+        return Photo(
+            id=photo_id,
+            filepath=f"C:/photos/{photo_id}.jpg",
+            filename=f"{photo_id}.jpg",
+            file_size=10,
+            sha256=sha256,
+            verdict=verdict,
+        )
+
+    def test_all_deleted_exact_copies_are_flagged(self):
+        photos = [
+            self._photo("a", "same", Verdict.DELETE),
+            self._photo("b", "same", Verdict.DELETE),
+        ]
+
+        risky = find_last_copy_deletions(photos)
+
+        self.assertEqual(["a", "b"], [photo.id for photo in risky])
+
+    def test_any_surviving_copy_removes_the_warning(self):
+        for survivor in (Verdict.KEEP, Verdict.ARCHIVE, Verdict.REVIEW):
+            with self.subTest(survivor=survivor):
+                photos = [
+                    self._photo("a", "same", Verdict.DELETE),
+                    self._photo("b", "same", survivor),
+                ]
+                self.assertEqual([], find_last_copy_deletions(photos))
+
+    def test_unique_delete_is_flagged_even_without_sha(self):
+        photo = self._photo("unique", None, Verdict.DELETE)
+
+        risky = find_last_copy_deletions([photo])
+
+        self.assertEqual([photo], risky)
 
 
 if __name__ == "__main__":

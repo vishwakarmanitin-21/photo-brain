@@ -14,7 +14,7 @@ from app.ui.dialogs import SettingsDialog, ApplyConfirmDialog, UndoResultDialog
 from app.core.session_store import SessionStore
 from app.core.models import SessionStatus, Verdict
 from app.core.thumbnails import PreviewCache, ThumbnailCache
-from app.core.file_ops import FileOperator
+from app.core.file_ops import FileOperator, find_last_copy_deletions
 from app.workers.scan_worker import ScanWorker
 from app.workers.thumb_worker import ThumbWorker
 from app.workers.preview_worker import PreviewWorker
@@ -326,7 +326,8 @@ class MainWindow(QMainWindow):
             return
 
         dialog = ApplyConfirmDialog(
-            keep_count, archive_count, delete_count, review_count, self
+            keep_count, archive_count, delete_count, review_count, self,
+            last_copy_delete_count=len(find_last_copy_deletions(photos)),
         )
         if dialog.exec() != QDialog.Accepted:
             return
@@ -390,7 +391,8 @@ class MainWindow(QMainWindow):
             return
 
         dialog = ApplyConfirmDialog(
-            keep_count, archive_count, delete_count, review_count, self
+            keep_count, archive_count, delete_count, review_count, self,
+            last_copy_delete_count=len(find_last_copy_deletions(photos)),
         )
         if dialog.exec() != QDialog.Accepted:
             return

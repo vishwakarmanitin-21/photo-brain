@@ -18,6 +18,22 @@ from app.util.paths import (
 log = logging.getLogger("photobrain.file_ops")
 
 
+def find_last_copy_deletions(photos: list[Photo]) -> list[Photo]:
+    """Return DELETE photos whose every scanned exact copy is also DELETE."""
+    copy_groups: dict[str, list[Photo]] = {}
+    for photo in photos:
+        # A missing SHA cannot be matched safely, so treat that file as its
+        # own known copy rather than assuming another photo will survive.
+        key = photo.sha256 or f"__unique_{photo.id}"
+        copy_groups.setdefault(key, []).append(photo)
+
+    risky: list[Photo] = []
+    for group in copy_groups.values():
+        if group and all(photo.verdict == Verdict.DELETE for photo in group):
+            risky.extend(group)
+    return sorted(risky, key=lambda photo: photo.filepath)
+
+
 class FileOperator:
     def __init__(self, source_folder: str, store: SessionStore, session_id: str):
         self.source_folder = source_folder
@@ -36,12 +52,6 @@ class FileOperator:
 
         Returns (processed_count, error_count).
         """
-        # Build a lookup of SHA256 -> has a KEEP photo
-        keep_shas: set[str] = set()
-        for p in photos:
-            if p.verdict == Verdict.KEEP and p.sha256:
-                keep_shas.add(p.sha256)
-
         entries: list[ApplyLogEntry] = []
         self.processed_cluster_ids.clear()
         self.failed_cluster_ids.clear()
