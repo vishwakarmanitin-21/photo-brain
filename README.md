@@ -247,4 +247,4 @@ your-photos/
 
 ## License
 
-Private project. All rights reserved.
+MIT — see [LICENSE](LICENSE). Free to use, modify, and share.

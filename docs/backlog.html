@@ -331,8 +331,8 @@
 
 <div class="tablewrap"><table>
   <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
-  <tr><td class="id">ADOPT-01</td><td><span class="badge b-crit">Blocker</span></td>
-    <td><b>The repo is public but the license says private.</b> README ends with "Private project. All rights reserved." on a PUBLIC GitHub repo with no LICENSE file — legally nobody may use, package, or contribute to it. Decide the license (MIT or Apache-2.0 recommended for this category) and add the file. Nothing else in this section matters until this is resolved.</td>
+  <tr><td class="id">ADOPT-01</td><td><span class="badge b-crit">Blocker</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>The repo is public but the license says private.</b> README ended with "Private project. All rights reserved." on a PUBLIC GitHub repo with no LICENSE file — legally nobody could use, package, or contribute to it. Shipped: <b>MIT license</b> chosen by Nitin (2026-07-11); LICENSE file added, README license section updated.</td>
     <td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">ADOPT-02</td><td><span class="badge b-crit">Blocker</span></td>
     <td><b>The distribution story currently ends at a SmartScreen wall.</b> UPX compression + unsigned exe is the classic Defender/VirusTotal false-positive pattern; most non-technical users stop at "Windows protected your PC." Fix: <code>upx=False</code> (size is irrelevant in a mediapipe bundle), apply to <b>SignPath Foundation</b> (free OSS code signing), document the "More info → Run anyway" step meanwhile, and ship via <b>winget</b> (community repo, free) which sidesteps the browser-download prompt path.</td>
