@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QScrollArea, QGridLayout, QLabel, QFrame,
     QPushButton, QSizePolicy, QComboBox, QApplication, QSlider,
 )
-from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint
+from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer
 from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
@@ -107,6 +107,7 @@ class ThumbnailWidget(QFrame):
         self._selected = False
         self._hover_active = False
         self._display_size = BASE_THUMB_SIZE
+        self._source_pixmap = QPixmap()
         self.setFixedSize(BASE_THUMB_SIZE + 16, BASE_THUMB_SIZE + 100)
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)  # Enable mouse tracking for hover
@@ -220,6 +221,18 @@ class ThumbnailWidget(QFrame):
         """Set pixmap scaled to display_size, adjusting for aspect ratio."""
         if display_size is None:
             display_size = self._display_size
+        self._display_size = display_size
+        self._source_pixmap = QPixmap(pixmap)
+        self._render_pixmap()
+
+    def _render_pixmap(self):
+        """Rescale the already-decoded pixmap without touching disk."""
+        display_size = self._display_size
+        pixmap = self._source_pixmap
+        if pixmap.isNull():
+            self.setFixedSize(display_size + 16, display_size + 116)
+            self._image_label.setFixedSize(display_size, display_size)
+            return
 
         # Scale maintaining aspect ratio
         scaled = pixmap.scaled(
@@ -241,10 +254,7 @@ class ThumbnailWidget(QFrame):
     def update_size(self, display_size: int):
         """Resize widget to accommodate new display size."""
         self._display_size = display_size
-        # Set maximum dimensions - actual size will be set when pixmap is loaded
-        # This ensures the widget doesn't take up too much space initially
-        self.setFixedSize(display_size + 16, display_size + 116)
-        self._image_label.setFixedSize(display_size, display_size)
+        self._render_pixmap()
 
     def set_selected(self, selected: bool):
         self._selected = selected
@@ -328,6 +338,10 @@ class ReviewView(QWidget):
         self._selected_photo_id: str | None = None
         self._current_photos: list[Photo] = []  # Current cluster photos
         self._current_display_size = BASE_THUMB_SIZE  # Current thumbnail display size
+        self._zoom_debounce = QTimer(self)
+        self._zoom_debounce.setSingleShot(True)
+        self._zoom_debounce.setInterval(150)
+        self._zoom_debounce.timeout.connect(self._apply_zoom_change)
         self._build_ui()
         self._bind_shortcuts()
 
@@ -370,6 +384,7 @@ class ReviewView(QWidget):
         self._zoom_slider.setFixedWidth(150)
         self._zoom_slider.setToolTip(f"Thumbnail size: {BASE_THUMB_SIZE}px")
         self._zoom_slider.valueChanged.connect(self._on_zoom_changed)
+        self._zoom_slider.sliderReleased.connect(self._apply_zoom_change_immediately)
         zoom_layout.addWidget(self._zoom_slider)
 
         # Zoom in button
@@ -649,7 +664,15 @@ class ReviewView(QWidget):
         self._current_display_size = value
         self._zoom_slider.setToolTip(f"Thumbnail size: {value}px")
 
-        # Rebuild grid with new size
+        # Give immediate feedback using decoded pixmaps already in memory.
+        for widget in self._thumb_widgets.values():
+            widget.update_size(value)
+
+        # Disk/cache reload and column reflow happen once after dragging pauses.
+        self._zoom_debounce.start()
+
+    def _apply_zoom_change(self):
+        """Perform the coalesced grid rebuild for the latest slider value."""
         self._rebuild_grid_with_zoom()
 
         # Re-select current photo if any
@@ -657,6 +680,11 @@ class ReviewView(QWidget):
             widget = self._thumb_widgets.get(self._selected_photo_id)
             if widget:
                 widget.set_selected(True)
+
+    def _apply_zoom_change_immediately(self):
+        """Commit the final slider position when the handle is released."""
+        self._zoom_debounce.stop()
+        self._apply_zoom_change()
 
     def _rebuild_grid_with_zoom(self):
         """Rebuild thumbnail grid with current zoom level."""
