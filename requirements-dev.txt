@@ -1,0 +1,4 @@
+# Tools needed to build and test, on top of the runtime requirements.
+-r requirements.txt
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6

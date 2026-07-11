@@ -20,8 +20,9 @@ A local-first Windows desktop application for cleaning and organizing large batc
 
 ## Requirements
 
-- Python 3.10 or higher
-- Windows 10/11
+- Python 3.10 – 3.13 (developed and tested on 3.13; mediapipe wheels can lag
+  brand-new Python releases, so very recent versions may not install yet)
+- Windows 10/11 (64-bit)
 
 ## Installation
 
@@ -56,8 +57,8 @@ python run.py
 Create a distributable package that runs without Python installed:
 
 ```bash
-# Install PyInstaller (one-time)
-venv\Scripts\pip install pyinstaller
+# Install build tools (one-time)
+venv\Scripts\pip install -r requirements-dev.txt
 
 # Build the application
 venv\Scripts\python scripts\build.py
@@ -65,9 +66,21 @@ venv\Scripts\python scripts\build.py
 
 This produces:
 - `dist/PhotoBrain/` — folder with `PhotoBrain.exe` and all dependencies
-- `dist/PhotoBrain.zip` — zip archive (~120 MB) ready to share
+- `dist/PhotoBrain.zip` — zip archive (~150 MB) ready to share
 
-**To distribute:** Send the zip file to users. They extract it and run `PhotoBrain/PhotoBrain.exe` — no Python installation required. The mediapipe face detection models are downloaded automatically on first use (~5 MB).
+**To distribute:** Send the zip file to users. They extract it and run
+`PhotoBrain/PhotoBrain.exe` — no Python installation required. The face
+detection models are bundled, so everything works fully offline. (The
+download size is dominated by the on-device face-analysis engine — that's
+what keeps your photos on your PC.)
+
+### First run on a fresh PC
+
+- **Windows SmartScreen** may show "Windows protected your PC" because the
+  exe is not yet code-signed. Click **More info → Run anyway**. (Code
+  signing is on the roadmap.)
+- If the app fails to start with a DLL error, install the
+  [Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
 ## How It Works
 

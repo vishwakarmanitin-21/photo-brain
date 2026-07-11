@@ -1,7 +1,14 @@
-PySide6>=6.6.0,<7.0.0
-opencv-python>=4.8.0
-Pillow>=10.0.0
-imagehash>=4.3.0
-mediapipe>=0.10.0
-send2trash>=1.8.0
-scipy>=1.11.0
+# Pinned, known-good versions (tested together on Python 3.10-3.13, Windows).
+# Floor-only ranges made fresh installs unreproducible: mediapipe wheels lag
+# new Python releases and API drift across majors has broken builds before.
+PySide6==6.11.1
+# cv2 comes from opencv-contrib-python because mediapipe requires exactly
+# that build. Do NOT add opencv-python alongside it - both install the same
+# `cv2` package and silently shadow each other.
+opencv-contrib-python==5.0.0.93
+Pillow==12.3.0
+ImageHash==4.3.2
+mediapipe==0.10.35
+Send2Trash==2.1.0
+scipy==1.18.0
+numpy==2.5.1

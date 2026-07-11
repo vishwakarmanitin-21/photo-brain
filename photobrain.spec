@@ -68,7 +68,10 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX-packed PyInstaller exes are a classic antivirus/SmartScreen
+    # false-positive pattern, and compression is irrelevant next to the
+    # mediapipe payload. Never re-enable for distributed builds.
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -83,7 +86,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='PhotoBrain',
 )
