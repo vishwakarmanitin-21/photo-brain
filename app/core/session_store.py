@@ -1,6 +1,7 @@
 """SQLite persistence layer for PhotoBrain sessions."""
 import sqlite3
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -167,11 +168,35 @@ MIGRATION_V7_TO_V8 = [
 class SessionStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._thread_local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._connections_lock = threading.Lock()
+        self._closed = False
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.row_factory = sqlite3.Row
         self._init_schema()
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Return the calling thread's dedicated SQLite connection."""
+        if self._closed:
+            raise RuntimeError("SessionStore is closed")
+        conn = getattr(self._thread_local, "connection", None)
+        if conn is None:
+            conn = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+                timeout=30.0,
+            )
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.row_factory = sqlite3.Row
+            self._thread_local.connection = conn
+            with self._connections_lock:
+                if self._closed:
+                    conn.close()
+                    raise RuntimeError("SessionStore is closed")
+                self._connections.append(conn)
+        return conn
 
     def _init_schema(self):
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
@@ -269,7 +294,14 @@ class SessionStore:
         self._conn.commit()
 
     def close(self):
-        self._conn.close()
+        with self._connections_lock:
+            if self._closed:
+                return
+            self._closed = True
+            connections = self._connections
+            self._connections = []
+        for conn in connections:
+            conn.close()
 
     @contextmanager
     def _transaction(self):
