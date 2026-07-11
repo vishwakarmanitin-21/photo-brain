@@ -1,6 +1,7 @@
 """Face detection using mediapipe Tasks API — multi-scale short-range model."""
 import logging
 import os
+import sys
 import tempfile
 import urllib.request
 
@@ -40,16 +41,59 @@ _MODELS = {
 _DOWNSCALE_FACTORS = [0.5, 0.25]
 
 
+def _bundled_model_path(filename: str):
+    """Return the model shipped inside the app package, if present."""
+    if getattr(sys, "frozen", False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+    path = os.path.join(base, "assets", "models", filename)
+    return path if os.path.isfile(path) else None
+
+
 def _get_model_path(model_key: str) -> str:
-    """Download the model if not cached, return local path."""
+    """Return a local model path: bundled → user cache → atomic download.
+
+    Models ship inside the package so a fresh install works fully offline.
+    The download fallback exists for source checkouts that predate the
+    bundled files being fetched.
+    """
     info = _MODELS[model_key]
-    cache_dir = os.path.join(tempfile.gettempdir(), "photobrain_models")
+
+    bundled = _bundled_model_path(info["filename"])
+    if bundled:
+        return bundled
+
+    # %LOCALAPPDATA%, not %TEMP%: Windows Storage Sense routinely clears
+    # %TEMP%, which forced silent re-downloads (or silent no-face scans
+    # when offline).
+    cache_dir = os.path.join(
+        os.environ.get("LOCALAPPDATA", tempfile.gettempdir()),
+        "PhotoBrain", "models",
+    )
     os.makedirs(cache_dir, exist_ok=True)
     model_path = os.path.join(cache_dir, info["filename"])
-    if not os.path.exists(model_path):
-        log.info("Downloading %s model...", model_key)
-        urllib.request.urlretrieve(info["url"], model_path)
-        log.info("Model saved to %s", model_path)
+    if os.path.exists(model_path):
+        return model_path
+
+    # Atomic download: a partial file must never occupy the final path —
+    # it would poison face detection on every later run.
+    log.info("Downloading %s model...", model_key)
+    part_path = f"{model_path}.part"
+    try:
+        urllib.request.urlretrieve(info["url"], part_path)
+        if os.path.getsize(part_path) < 10_000:
+            raise OSError("model download truncated")
+        os.replace(part_path, model_path)
+    finally:
+        if os.path.exists(part_path):
+            try:
+                os.remove(part_path)
+            except OSError:
+                pass
+    log.info("Model saved to %s", model_path)
     return model_path
 
 
