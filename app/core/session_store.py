@@ -374,6 +374,14 @@ class SessionStore:
         )
         self._conn.commit()
 
+    def count_user_decisions(self, session_id: str) -> int:
+        """Count manual photo verdicts that a replacement scan would erase."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM photos WHERE session_id=? AND user_override=1",
+            (session_id,),
+        ).fetchone()
+        return int(row[0])
+
     # ── Photos ───────────────────────────────────────────
 
     def insert_photos_batch(self, session_id: str, photos: list[Photo]):

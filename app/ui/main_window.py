@@ -101,9 +101,23 @@ class MainWindow(QMainWindow):
             self.store.close()
         self.store = SessionStore(db_path)
 
-        # Check for existing session and clear it
+        # Never destroy saved review work on a Start Scan misclick.
         existing = self.store.get_session()
         if existing:
+            decision_count = self.store.count_user_decisions(existing.id)
+            reply = QMessageBox.warning(
+                self,
+                "Replace Previous Session?",
+                "This folder already has a PhotoBrain session with "
+                f"{decision_count} manual photo decision(s).\n\n"
+                "Starting a new scan will permanently remove its saved review "
+                "progress and undo journal. Files already moved will not be "
+                "changed.\n\nContinue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
             self.store.delete_session_data(existing.id)
 
         self.session_id = uuid.uuid4().hex[:12]
