@@ -55,6 +55,68 @@ class HardeningTests(unittest.TestCase):
                 "2026-07-01T09:00:00", extract_exif_datetime(path)
             )
 
+    def test_apply_never_overwrites_file_racing_into_destination(self):
+        # SAFE-12(c): a file that appears at the planned destination between
+        # planning (resolve_collision) and moving must not be clobbered.
+        from app.core.file_ops import FileOperator
+        from app.core.models import Verdict
+        from app.core.session_store import SessionStore
+        from app.util.paths import KEEP_FOLDER, get_db_path
+
+        with tempfile.TemporaryDirectory() as source:
+            path = _write_image(source, "a.jpg")
+            store = SessionStore(get_db_path(source))
+            store.create_session("s1", source)
+            photo = Photo(
+                id="p1", filepath=path, filename="a.jpg", file_size=1,
+                verdict=Verdict.KEEP,
+            )
+
+            # Simulate the race: the planned name is already taken by the
+            # time the move happens (planning is patched to be a no-op).
+            keep_dir = os.path.join(source, KEEP_FOLDER)
+            os.makedirs(keep_dir)
+            racing = os.path.join(keep_dir, "a.jpg")
+            with open(racing, "wb") as f:
+                f.write(b"racing-content")
+
+            operator = FileOperator(source, store, "s1")
+            with patch(
+                "app.core.file_ops.resolve_collision", side_effect=lambda p: p
+            ):
+                processed, errors = operator.apply_verdicts([photo])
+
+            self.assertEqual((1, 0), (processed, errors))
+            with open(racing, "rb") as f:
+                self.assertEqual(b"racing-content", f.read())  # untouched
+            suffixed = os.path.join(keep_dir, "a_1.jpg")
+            self.assertTrue(os.path.isfile(suffixed))
+            # The journal must point at where the file actually landed.
+            (entry,) = store.get_apply_log("s1")
+            self.assertEqual(suffixed, entry.destination_path)
+
+            # And undo must bring it home using the corrected journal.
+            restored, skipped = operator.undo_last_apply()
+            self.assertEqual((1, 0), (restored, skipped))
+            self.assertTrue(os.path.isfile(path))
+            store.close()
+
+    def test_move_no_overwrite_handles_paths_beyond_max_path(self):
+        from app.util.paths import extended_path, move_no_overwrite
+
+        with tempfile.TemporaryDirectory() as folder:
+            deep = os.path.join(folder, *["deep_segment_" + "x" * 40] * 6)
+            self.assertGreater(len(deep), 260)
+            os.makedirs(extended_path(deep), exist_ok=True)
+
+            src = _write_image(folder, "src.jpg")
+            dest = os.path.join(deep, "dest.jpg")
+            final = move_no_overwrite(src, dest)
+
+            self.assertEqual(dest, final)
+            self.assertTrue(os.path.isfile(extended_path(dest)))
+            self.assertFalse(os.path.isfile(src))
+
     def test_scan_survives_file_vanishing_mid_hash(self):
         with tempfile.TemporaryDirectory() as folder:
             paths = [

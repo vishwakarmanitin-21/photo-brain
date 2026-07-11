@@ -2,7 +2,6 @@
 import os
 import csv
 import json
-import shutil
 import logging
 from datetime import datetime, timezone
 
@@ -13,6 +12,7 @@ from app.core.session_store import SessionStore
 from app.util.paths import (
     KEEP_FOLDER, ARCHIVE_DUPES_FOLDER, ARCHIVE_LOW_QUALITY_FOLDER,
     get_output_dir, get_log_dir, resolve_collision,
+    extended_path, move_no_overwrite,
 )
 
 log = logging.getLogger("photobrain.file_ops")
@@ -69,7 +69,7 @@ class FileOperator:
                 # on Windows which requires pure backslashes
                 filepath = os.path.normpath(photo.filepath)
 
-                if not os.path.isfile(filepath):
+                if not os.path.isfile(extended_path(filepath)):
                     log.warning("Source file missing: %s", filepath)
                     if photo.cluster_id:
                         self.failed_cluster_ids.add(photo.cluster_id)
@@ -115,10 +115,17 @@ class FileOperator:
                     # Permanent delete — send to Recycle Bin
                     send2trash(filepath)
                 else:
-                    shutil.move(filepath, entry.destination_path)
-                    self.store.update_photo_path(
-                        photo.id, entry.destination_path,
+                    final_dest = move_no_overwrite(
+                        filepath, entry.destination_path,
                     )
+                    if final_dest != entry.destination_path:
+                        # The planned name got taken between planning and
+                        # moving — keep the journal pointing at reality.
+                        entry.destination_path = final_dest
+                        self.store.update_apply_log_destination(
+                            entry.db_id, final_dest,
+                        )
+                    self.store.update_photo_path(photo.id, final_dest)
 
                 entries.append(entry)
                 if photo.cluster_id:
@@ -134,7 +141,7 @@ class FileOperator:
                 # raise after doing part (or all) of the requested operation;
                 # in that ambiguous case the recovery record must survive.
                 if entry is not None and entry.db_id is not None:
-                    if os.path.exists(entry.original_path):
+                    if os.path.exists(extended_path(entry.original_path)):
                         try:
                             self.store.delete_apply_log_entry(entry.db_id)
                         except Exception:
@@ -262,8 +269,8 @@ class FileOperator:
                         resolved_entry_ids.append(entry.db_id)
                     continue
 
-                if not os.path.isfile(entry.destination_path):
-                    if os.path.isfile(entry.original_path):
+                if not os.path.isfile(extended_path(entry.destination_path)):
+                    if os.path.isfile(extended_path(entry.original_path)):
                         # Crash after journaling but before the move, or the
                         # user already restored it manually: desired state is
                         # satisfied, so this journal row is resolved.
@@ -281,17 +288,17 @@ class FileOperator:
 
                 # Ensure original directory exists
                 orig_dir = os.path.dirname(entry.original_path)
-                os.makedirs(orig_dir, exist_ok=True)
+                os.makedirs(extended_path(orig_dir), exist_ok=True)
 
-                # Handle collision at original location
-                restore_path = entry.original_path
-                if os.path.exists(restore_path):
-                    restore_path = resolve_collision(restore_path)
+                # Never overwrite whatever now occupies the original path —
+                # move_no_overwrite suffixes _1, _2, ... when it is taken.
+                restore_path = move_no_overwrite(
+                    entry.destination_path, entry.original_path,
+                )
+                if restore_path != entry.original_path:
                     log.warning(
-                        "Original path occupied, restoring to: %s", restore_path
+                        "Original path occupied, restored to: %s", restore_path
                     )
-
-                shutil.move(entry.destination_path, restore_path)
                 self.store.update_photo_path(entry.photo_id, restore_path)
                 restored += 1
                 if entry.db_id is not None:

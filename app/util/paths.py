@@ -1,5 +1,7 @@
 """Path utilities for PhotoBrain."""
+import errno
 import os
+import shutil
 
 PHOTOBRAIN_DIR = ".photobrain"
 THUMBS_DIR = "thumbs"
@@ -70,3 +72,63 @@ def resolve_collision(dest_path: str) -> str:
         if not os.path.exists(candidate):
             return candidate
         counter += 1
+
+
+def extended_path(path: str) -> str:
+    r"""Return a Windows extended-length path (\\?\ prefix).
+
+    Lifts the ~260-character MAX_PATH limit for os-level calls, which
+    otherwise fail on deep photo trees even though the files are fine.
+    Returns the path unchanged on other platforms or when already prefixed.
+    Use only at OS-call boundaries — stored and displayed paths stay plain.
+    """
+    if os.name != "nt":
+        return path
+    p = os.path.normpath(os.path.abspath(path))
+    if p.startswith("\\\\?\\"):
+        return p
+    if p.startswith("\\\\"):
+        return "\\\\?\\UNC" + p[1:]
+    return "\\\\?\\" + p
+
+
+def move_no_overwrite(src: str, dest_path: str) -> str:
+    """Move src to dest_path without ever overwriting an existing file.
+
+    Windows os.rename refuses to replace an existing destination, which
+    closes the plan-then-move race where two same-named photos could
+    silently clobber each other (shutil.move's copy fallback overwrites).
+    Returns the destination actually used — suffixed _1, _2, ... when the
+    planned name was taken after planning. Cross-drive moves fall back to
+    exclusive-create + copy, preserving the no-overwrite guarantee.
+    """
+    stem, ext = os.path.splitext(dest_path)
+    counter = 0
+    candidate = dest_path
+    while True:
+        try:
+            os.rename(extended_path(src), extended_path(candidate))
+            return candidate
+        except FileExistsError:
+            pass  # name taken since planning — try the next suffix
+        except OSError as error:
+            cross_device = (
+                error.errno == errno.EXDEV
+                or getattr(error, "winerror", None) == 17
+            )
+            if not cross_device:
+                raise
+            # Different drive or network share: claim the name exclusively,
+            # then copy onto our own placeholder and remove the source.
+            try:
+                with open(extended_path(candidate), "xb"):
+                    pass
+            except FileExistsError:
+                counter += 1
+                candidate = f"{stem}_{counter}{ext}"
+                continue
+            shutil.copy2(extended_path(src), extended_path(candidate))
+            os.remove(extended_path(src))
+            return candidate
+        counter += 1
+        candidate = f"{stem}_{counter}{ext}"

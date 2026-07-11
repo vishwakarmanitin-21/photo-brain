@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -7,6 +6,7 @@ from unittest.mock import patch
 from app.core.file_ops import FileOperator, find_last_copy_deletions
 from app.core.models import DupType, Photo, Verdict
 from app.core.session_store import SessionStore
+from app.util.paths import move_no_overwrite as real_move
 
 
 class FileOperatorJournalTests(unittest.TestCase):
@@ -38,7 +38,6 @@ class FileOperatorJournalTests(unittest.TestCase):
 
     def test_move_is_journaled_before_filesystem_mutation(self):
         photo = self._photo()
-        real_move = shutil.move
 
         def assert_journal_then_move(source, destination):
             entries = self.store.get_apply_log(self.session_id)
@@ -48,7 +47,10 @@ class FileOperatorJournalTests(unittest.TestCase):
             self.assertIsNotNone(entries[0].db_id)
             return real_move(source, destination)
 
-        with patch("app.core.file_ops.shutil.move", side_effect=assert_journal_then_move):
+        with patch(
+            "app.core.file_ops.move_no_overwrite",
+            side_effect=assert_journal_then_move,
+        ):
             processed, errors = self.operator.apply_verdicts([photo])
 
         self.assertEqual((1, 0), (processed, errors))
@@ -59,7 +61,10 @@ class FileOperatorJournalTests(unittest.TestCase):
     def test_failed_move_removes_unused_journal_plan(self):
         photo = self._photo()
 
-        with patch("app.core.file_ops.shutil.move", side_effect=OSError("locked")):
+        with patch(
+            "app.core.file_ops.move_no_overwrite",
+            side_effect=OSError("locked"),
+        ):
             processed, errors = self.operator.apply_verdicts([photo])
 
         self.assertEqual((0, 1), (processed, errors))
@@ -68,13 +73,15 @@ class FileOperatorJournalTests(unittest.TestCase):
 
     def test_journal_survives_exception_after_source_disappears(self):
         photo = self._photo()
-        real_move = shutil.move
 
         def move_then_raise(source, destination):
             real_move(source, destination)
             raise OSError("late filesystem error")
 
-        with patch("app.core.file_ops.shutil.move", side_effect=move_then_raise):
+        with patch(
+            "app.core.file_ops.move_no_overwrite",
+            side_effect=move_then_raise,
+        ):
             processed, errors = self.operator.apply_verdicts([photo])
 
         self.assertEqual((0, 1), (processed, errors))
@@ -105,14 +112,15 @@ class FileOperatorJournalTests(unittest.TestCase):
         first.cluster_id = "cluster-1"
         second = self._photo("second.jpg")
         second.cluster_id = "cluster-1"
-        real_move = shutil.move
 
         def fail_second(source, destination):
             if source == second.filepath:
                 raise OSError("locked")
             return real_move(source, destination)
 
-        with patch("app.core.file_ops.shutil.move", side_effect=fail_second):
+        with patch(
+            "app.core.file_ops.move_no_overwrite", side_effect=fail_second,
+        ):
             processed, errors = self.operator.apply_verdicts([first, second])
 
         self.assertEqual((1, 1), (processed, errors))
@@ -127,14 +135,15 @@ class FileOperatorJournalTests(unittest.TestCase):
             entry.destination_path for entry in entries
             if entry.photo_id == second.id
         )
-        real_move = shutil.move
 
         def fail_locked(source, destination):
             if source == locked_destination:
                 raise OSError("locked")
             return real_move(source, destination)
 
-        with patch("app.core.file_ops.shutil.move", side_effect=fail_locked):
+        with patch(
+            "app.core.file_ops.move_no_overwrite", side_effect=fail_locked,
+        ):
             restored, skipped = self.operator.undo_last_apply()
 
         self.assertEqual((1, 1), (restored, skipped))

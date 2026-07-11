@@ -568,6 +568,14 @@ class SessionStore:
         self._conn.execute("DELETE FROM apply_log WHERE id=?", (entry_id,))
         self._conn.commit()
 
+    def update_apply_log_destination(self, entry_id: int, destination_path: str):
+        """Correct a journal row when the move landed on a suffixed name."""
+        self._conn.execute(
+            "UPDATE apply_log SET destination_path=? WHERE id=?",
+            (destination_path, entry_id),
+        )
+        self._conn.commit()
+
     def delete_apply_log_entries(self, entry_ids: list[int]):
         """Remove only journal entries that undo has conclusively resolved."""
         if not entry_ids:

@@ -220,9 +220,9 @@
   <tr><td class="id">SAFE-11</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Cancelled/failed scans leave the session stuck in SCANNING</b> with half-written photos and no clusters; reopening that folder is undefined. Shipped: the scan worker discards its half-written session in a <code>finally</code> on cancel or error, and Start Scan silently clears crash leftovers frozen in SCANNING (they can hold no review work) instead of nagging. 4 regression tests.</td>
     <td class="loc">workers/scan_worker.py · ui/main_window.py</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-12</td><td><span class="badge b-med">Med</span></td>
-    <td>Cluster of smaller robustness holes: close/cancel can time out and close the DB under a live worker (main_window.py:132,408); PIL handles leaked in hashing/events/thumbnails can cause WinError 32 on the very file being moved; TOCTOU <code>getsize</code> crash kills a whole scan if OneDrive dehydrates one file mid-scan (scanner.py:52); paths &gt;260 chars unhandled; collision resolution can silently overwrite under a race. Fix as one "hardening" batch.</td>
-    <td class="loc">multiple (see agents' notes)</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">SAFE-12</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td>Cluster of smaller robustness holes, shipped as three hardening commits: (a) pHash/EXIF/thumbnail readers release file handles immediately and a file vanishing mid-scan no longer aborts the scan; (b) the session store is never closed under a live scan worker — exit skips close (WAL-safe) and Start Scan waits for the previous worker; (c) moves never overwrite an existing file (<code>move_no_overwrite</code>, journal corrected to the actual landing name) and file operations handle Windows paths beyond 260 characters (<code>\\?\</code> at OS-call boundaries). 11 regression tests.</td>
+    <td class="loc">util/paths.py · core/file_ops.py · core/hashing.py · core/events.py · core/thumbnails.py · core/scanner.py · ui/main_window.py</td><td><span class="badge b-eff">M</span></td></tr>
 </table></div>
 
 <h2 id="ux">B. UX &amp; UI findings</h2>
