@@ -46,7 +46,9 @@ Strict separation:
 
 ## Quality Score
 
-`0.45 * log(sharpness+1) + 0.13 * (brightness/255) + 0.10 * min(face_count,3) + 0.12 * eyes_open + 0.09 * smile + 0.05 * isolation + 0.04 * expression + 0.02 * frontal`
+All terms normalized to [0,1]; score is in [0,1]. Sharpness is contrast-normalized (a darker exposure of the same frame must not read as blurrier), log-compressed, capped at reference 1000. Exposure peaks at mid-gray 128.
+
+`0.45 * min(1, log(sharp_cnorm+1)/log(1001)) + 0.13 * (1-|brightness-128|/128) + 0.10 * (min(face_count,3)/3) + 0.12 * eyes_open + 0.09 * smile + 0.05 * isolation + 0.04 * expression + 0.02 * frontal`
 
 ## Post-Change Checklist
 
