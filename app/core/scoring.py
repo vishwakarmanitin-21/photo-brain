@@ -5,6 +5,7 @@ from typing import Optional
 
 import cv2
 
+from app.core.image_io import read_image
 from app.core.models import Photo, Verdict, DupType
 
 log = logging.getLogger("photobrain.scoring")
@@ -12,7 +13,7 @@ log = logging.getLogger("photobrain.scoring")
 
 def compute_sharpness(filepath: str) -> float:
     try:
-        gray = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE)
+        gray = read_image(filepath, cv2.IMREAD_GRAYSCALE)
         if gray is None:
             log.warning("Cannot read image for sharpness: %s", filepath)
             return 0.0
@@ -24,7 +25,7 @@ def compute_sharpness(filepath: str) -> float:
 
 def compute_brightness(filepath: str) -> float:
     try:
-        gray = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE)
+        gray = read_image(filepath, cv2.IMREAD_GRAYSCALE)
         if gray is None:
             log.warning("Cannot read image for brightness: %s", filepath)
             return 0.0

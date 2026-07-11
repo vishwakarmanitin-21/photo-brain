@@ -8,6 +8,8 @@ import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from app.core.image_io import read_image
+
 log = logging.getLogger("photobrain.faces")
 
 # Lazy-loaded singletons
@@ -236,7 +238,7 @@ def detect_faces(filepath: str) -> tuple[int, float, str, float]:
                           0.0 when no faces found.
     """
     try:
-        img = cv2.imread(filepath)
+        img = read_image(filepath)
         if img is None:
             log.warning("Cannot read image for face detection: %s", filepath)
             return 0, 0.0, "none", 0.0
@@ -445,7 +447,7 @@ def analyze_expressions(filepath: str) -> tuple[float, float, float, float]:
     try:
         import mediapipe as mp
 
-        img = cv2.imread(filepath)
+        img = read_image(filepath)
         if img is None:
             return 0.0, 0.0, 0.0, 0.0
 
