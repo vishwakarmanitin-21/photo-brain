@@ -262,8 +262,6 @@ class MainWindow(QMainWindow):
                 )
             return
 
-        # Show how many clusters will be processed
-        unapplied_clusters = [c for c in all_clusters if not c.applied]
         dialog = ApplyConfirmDialog(
             keep_count, archive_count, delete_count, review_count, self
         )
@@ -275,9 +273,10 @@ class MainWindow(QMainWindow):
             operator = FileOperator(self.source_folder, self.store, self.session_id)
             processed, errors = operator.apply_verdicts(photos)
 
-            # Mark all unapplied clusters as applied
-            for cluster in unapplied_clusters:
-                self.store.update_cluster_applied(cluster.id, True)
+            # Only clusters that actually completed file operations should be
+            # hidden from future applies. REVIEW-only and failed clusters stay.
+            for cluster_id in operator.applied_cluster_ids:
+                self.store.update_cluster_applied(cluster_id, True)
 
             self.store.update_session_status(self.session_id, SessionStatus.APPLIED)
 
@@ -338,16 +337,19 @@ class MainWindow(QMainWindow):
             operator = FileOperator(self.source_folder, self.store, self.session_id)
             processed, errors = operator.apply_verdicts(photos)
 
-            # Mark cluster as applied in database
-            self.store.update_cluster_applied(cluster_id, True)
+            cluster_applied = cluster_id in operator.applied_cluster_ids
+            if cluster_applied:
+                self.store.update_cluster_applied(cluster_id, True)
 
             msg = f"Processed {processed} files in this cluster successfully."
             if errors:
                 msg += f"\n{errors} files had errors (see log)."
             QMessageBox.information(self, "Apply Complete", msg)
 
-            # Mark cluster as applied in UI and navigate to next
-            self.review_view.mark_cluster_applied(cluster_id)
+            # Mark cluster as applied in UI and navigate to next only when all
+            # of its requested filesystem operations completed.
+            if cluster_applied:
+                self.review_view.mark_cluster_applied(cluster_id)
 
         except Exception as e:
             log.exception("Cluster apply failed")
@@ -374,8 +376,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            touched_cluster_ids = {
+                entry.cluster_id for entry in apply_log if entry.cluster_id
+            }
             operator = FileOperator(self.source_folder, self.store, self.session_id)
             restored, skipped = operator.undo_last_apply()
+            for cluster_id in touched_cluster_ids:
+                self.store.update_cluster_applied(cluster_id, False)
             self.store.update_session_status(self.session_id, SessionStatus.REVIEWING)
 
             dialog = UndoResultDialog(restored, skipped, self)

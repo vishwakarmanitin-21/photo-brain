@@ -23,6 +23,8 @@ class FileOperator:
         self.source_folder = source_folder
         self.store = store
         self.session_id = session_id
+        self.processed_cluster_ids: set[str] = set()
+        self.failed_cluster_ids: set[str] = set()
 
     def apply_verdicts(self, photos: list[Photo]) -> tuple[int, int]:
         """Move/delete photos based on verdicts.
@@ -41,6 +43,8 @@ class FileOperator:
                 keep_shas.add(p.sha256)
 
         entries: list[ApplyLogEntry] = []
+        self.processed_cluster_ids.clear()
+        self.failed_cluster_ids.clear()
         processed = 0
         errors = 0
         now = datetime.now(timezone.utc).isoformat()
@@ -57,6 +61,8 @@ class FileOperator:
 
                 if not os.path.isfile(filepath):
                     log.warning("Source file missing: %s", filepath)
+                    if photo.cluster_id:
+                        self.failed_cluster_ids.add(photo.cluster_id)
                     errors += 1
                     continue
 
@@ -102,10 +108,14 @@ class FileOperator:
                     shutil.move(filepath, entry.destination_path)
 
                 entries.append(entry)
+                if photo.cluster_id:
+                    self.processed_cluster_ids.add(photo.cluster_id)
                 processed += 1
 
             except Exception as e:
                 log.error("Failed to process %s: %s", photo.filepath, e)
+                if photo.cluster_id:
+                    self.failed_cluster_ids.add(photo.cluster_id)
                 # Remove the plan only when the source still proves no
                 # destructive mutation completed. Some filesystem APIs can
                 # raise after doing part (or all) of the requested operation;
@@ -133,6 +143,11 @@ class FileOperator:
 
         log.info("Apply complete: %d processed, %d errors", processed, errors)
         return processed, errors
+
+    @property
+    def applied_cluster_ids(self) -> set[str]:
+        """Clusters with completed work and no failed file operations."""
+        return self.processed_cluster_ids - self.failed_cluster_ids
 
     def _get_dest_folder(self, photo: Photo) -> str:
         if photo.verdict == Verdict.KEEP:

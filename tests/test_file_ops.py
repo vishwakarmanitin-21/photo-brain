@@ -83,6 +83,41 @@ class FileOperatorJournalTests(unittest.TestCase):
         self.assertEqual(1, len(entries))
         self.assertTrue(os.path.exists(entries[0].destination_path))
 
+    def test_only_successful_touched_clusters_are_applied(self):
+        successful = self._photo("successful.jpg")
+        successful.cluster_id = "successful-cluster"
+        missing = self._photo("missing.jpg")
+        missing.cluster_id = "failed-cluster"
+        os.remove(missing.filepath)
+        undecided = self._photo("undecided.jpg")
+        undecided.cluster_id = "untouched-cluster"
+        undecided.verdict = Verdict.REVIEW
+
+        processed, errors = self.operator.apply_verdicts(
+            [successful, missing, undecided],
+        )
+
+        self.assertEqual((1, 1), (processed, errors))
+        self.assertEqual({"successful-cluster"}, self.operator.applied_cluster_ids)
+
+    def test_cluster_with_partial_failure_remains_unapplied(self):
+        first = self._photo("first.jpg")
+        first.cluster_id = "cluster-1"
+        second = self._photo("second.jpg")
+        second.cluster_id = "cluster-1"
+        real_move = shutil.move
+
+        def fail_second(source, destination):
+            if source == second.filepath:
+                raise OSError("locked")
+            return real_move(source, destination)
+
+        with patch("app.core.file_ops.shutil.move", side_effect=fail_second):
+            processed, errors = self.operator.apply_verdicts([first, second])
+
+        self.assertEqual((1, 1), (processed, errors))
+        self.assertEqual(set(), self.operator.applied_cluster_ids)
+
 
 if __name__ == "__main__":
     unittest.main()
