@@ -49,12 +49,15 @@ class ScanWorker(QThread):
         return self._cancelled
 
     def run(self):
+        completed = False
         try:
-            self._run_pipeline()
+            completed = bool(self._run_pipeline())
         except Exception as e:
             log.exception("Scan failed")
             self.scan_error.emit(str(e))
         finally:
+            if not completed:
+                self._discard_incomplete_session()
             # Clean up mediapipe resources
             try:
                 from app.core.faces import cleanup
@@ -62,18 +65,32 @@ class ScanWorker(QThread):
             except Exception:
                 pass
 
+    def _discard_incomplete_session(self):
+        """Remove the half-written session after a cancelled or failed scan.
+
+        Without this, the session stays in SCANNING with partial photo rows
+        and no clusters — a state no other code path expects to load.
+        """
+        try:
+            self.store.delete_session_data(self.session_id)
+            log.info("Discarded incomplete scan session %s", self.session_id)
+        except Exception:
+            log.exception(
+                "Failed to discard incomplete session %s", self.session_id
+            )
+
     def _run_pipeline(self):
         # Phase 1: Collect files
         self.phase_changed.emit("Collecting files...")
         files = collect_files(self.source_folder)
         if self._cancelled:
-            return
+            return False
         self.stats_updated.emit("total_files", len(files))
         self.store.update_session_progress(self.session_id, len(files), 0)
 
         if not files:
             self.scan_error.emit("No supported image files found in the selected folder.")
-            return
+            return False
 
         # Phase 2: SHA256 hashes
         self.phase_changed.emit("Computing file hashes...")
@@ -86,7 +103,7 @@ class ScanWorker(QThread):
 
         photos = compute_hashes(files, hash_progress, self._is_cancelled)
         if self._cancelled:
-            return
+            return False
 
         # Count exact duplicates
         sha_counts: dict[str, int] = {}
@@ -109,7 +126,7 @@ class ScanWorker(QThread):
 
         compute_phashes(photos, phash_progress, self._is_cancelled)
         if self._cancelled:
-            return
+            return False
 
         # Phase 4: Quality scoring
         self.phase_changed.emit("Scoring image quality...")
@@ -121,7 +138,7 @@ class ScanWorker(QThread):
 
         compute_scores(photos, score_progress, self._is_cancelled)
         if self._cancelled:
-            return
+            return False
 
         # Phase 5: Face detection (optional)
         if self.face_detection_enabled:
@@ -133,7 +150,7 @@ class ScanWorker(QThread):
 
             face_stats = detect_all_faces(photos, face_progress, self._is_cancelled)
             if self._cancelled:
-                return
+                return False
             self.stats_updated.emit("faces_detected", face_stats["faces_total"])
             self.stats_updated.emit("faces_close", face_stats["faces_close"])
             self.stats_updated.emit("faces_far", face_stats["faces_far"])
@@ -152,7 +169,7 @@ class ScanWorker(QThread):
                     photos, expr_progress, self._is_cancelled
                 )
                 if self._cancelled:
-                    return
+                    return False
                 self.stats_updated.emit("expressions_analyzed", expr_count)
 
         # Phase 6: EXIF dates + event grouping
@@ -164,19 +181,19 @@ class ScanWorker(QThread):
 
         dated_count = extract_dates(photos, date_progress, self._is_cancelled)
         if self._cancelled:
-            return
+            return False
 
         self.phase_changed.emit("Grouping into events...")
         events, event_photos = build_photo_events(photos, self.event_gap_hours)
         if self._cancelled:
-            return
+            return False
         self.stats_updated.emit("events", len(events))
 
         # Phase 7: Clustering
         self.phase_changed.emit("Clustering similar photos...")
         clusters, cluster_photos = run_clustering(photos, self.phash_threshold)
         if self._cancelled:
-            return
+            return False
         self.stats_updated.emit("clusters", len(clusters))
 
         # Phase 8: Suggest verdicts
@@ -195,3 +212,4 @@ class ScanWorker(QThread):
             len(photos), len(clusters), len(events), dup_count,
         )
         self.scan_finished.emit()
+        return True

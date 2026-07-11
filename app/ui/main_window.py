@@ -109,6 +109,13 @@ class MainWindow(QMainWindow):
 
         # Never destroy saved review work on a Start Scan misclick.
         existing = self.store.get_session()
+        if existing and existing.status == SessionStatus.SCANNING:
+            # Leftover from a scan the app never finished (e.g. power loss).
+            # A SCANNING session cannot hold review decisions or an undo
+            # journal, so there is nothing to warn about — just clear it.
+            log.info("Clearing crash-leftover SCANNING session %s", existing.id)
+            self.store.delete_session_data(existing.id)
+            existing = None
         if existing:
             decision_count = self.store.count_user_decisions(existing.id)
             reply = QMessageBox.warning(

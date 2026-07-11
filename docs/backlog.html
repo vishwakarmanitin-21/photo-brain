@@ -217,9 +217,9 @@
   <tr><td class="id">SAFE-10</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>DB filepaths never updated after apply/undo moves</b> — collision-renamed restores (<code>name_1.jpg</code>) and re-applies then report "Source file missing." Fix: write back the new path on every successful move.</td>
     <td class="loc">core/file_ops.py:82,215-221</td><td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">SAFE-11</td><td><span class="badge b-med">Med</span></td>
-    <td><b>Cancelled/failed scans leave the session stuck in SCANNING</b> with half-written photos and no clusters; reopening that folder is undefined. Fix: reset to NEW/FAILED in a <code>finally</code>.</td>
-    <td class="loc">workers/scan_worker.py:51-124</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">SAFE-11</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>Cancelled/failed scans leave the session stuck in SCANNING</b> with half-written photos and no clusters; reopening that folder is undefined. Shipped: the scan worker discards its half-written session in a <code>finally</code> on cancel or error, and Start Scan silently clears crash leftovers frozen in SCANNING (they can hold no review work) instead of nagging. 4 regression tests.</td>
+    <td class="loc">workers/scan_worker.py · ui/main_window.py</td><td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">SAFE-12</td><td><span class="badge b-med">Med</span></td>
     <td>Cluster of smaller robustness holes: close/cancel can time out and close the DB under a live worker (main_window.py:132,408); PIL handles leaked in hashing/events/thumbnails can cause WinError 32 on the very file being moved; TOCTOU <code>getsize</code> crash kills a whole scan if OneDrive dehydrates one file mid-scan (scanner.py:52); paths &gt;260 chars unhandled; collision resolution can silently overwrite under a race. Fix as one "hardening" batch.</td>
     <td class="loc">multiple (see agents' notes)</td><td><span class="badge b-eff">M</span></td></tr>
