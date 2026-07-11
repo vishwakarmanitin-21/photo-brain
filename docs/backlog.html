@@ -14,6 +14,7 @@
     --low: #15803d; --low-bg: #dcfce7;
     --good: #0f766e; --good-bg: #ccfbf1;
     --verified: #6d28d9; --verified-bg: #ede9fe;
+    --shipped: #047857; --shipped-bg: #d1fae5;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -25,6 +26,7 @@
       --low: #86efac; --low-bg: #12381f;
       --good: #5eead4; --good-bg: #103732;
       --verified: #c4b5fd; --verified-bg: #2a2145;
+      --shipped: #6ee7b7; --shipped-bg: #123c32;
     }
   }
   * { box-sizing: border-box; }
@@ -52,6 +54,7 @@
   .b-low  { color: var(--low);  background: var(--low-bg); }
   .b-good { color: var(--good); background: var(--good-bg); }
   .b-ver  { color: var(--verified); background: var(--verified-bg); }
+  .b-ship { color: var(--shipped); background: var(--shipped-bg); }
   .b-eff  { color: var(--muted); background: var(--card); border: 1px solid var(--line); }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 16px 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
@@ -72,7 +75,7 @@
 <body>
 
 <h1>PhotoBrain — Audit &amp; Backlog</h1>
-<p class="sub">Produced 11 Jul 2026 · full code audit (all ~4,900 lines) + live run of the app through scan → review → apply → undo + market research on competitors and distribution. <b>No code was changed.</b> Status of every item: <i>Proposed</i>.</p>
+<p class="sub">Produced 11 Jul 2026 · full code audit (all ~4,900 lines) + live run of the app through scan → review → apply → undo + market research on competitors and distribution. Updated as implementation lands; green <b>SHIPPED</b> badges are verified completed work.</p>
 
 <p class="lead"><b>The one-paragraph verdict:</b> PhotoBrain's engine is genuinely good — clean architecture, a working end-to-end pipeline, and a feature (face/expression-aware "best shot" picking) that <b>no free Windows tool offers today</b>. The gap between here and a tool strangers love is not missing features; it's (1) a small set of data-safety bugs that could lose a user's decisions or files, (2) a scoring formula whose face/expression intelligence is mathematically drowned out — so the headline differentiator doesn't actually decide picks yet (§F) — and a curation flow that auto-keeps all standalone junk (§G), (3) a distribution story that currently ends at a SmartScreen warning and a "Private — all rights reserved" license on a public repo, and (4) first-ten-minutes polish. Fix safety first, then make the core promise true, then launch-readiness, then delight, then scale.</p>
 
@@ -102,28 +105,28 @@
 
 <div class="tablewrap"><table>
   <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Where</th><th>Eff.</th></tr>
-  <tr><td class="id">SAFE-01</td><td><span class="badge b-crit">Critical</span></td>
+  <tr><td class="id">SAFE-01</td><td><span class="badge b-crit">Critical</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Undo journal is written only after ALL moves finish.</b> A crash or power cut mid-apply (photo 3,000 of 6,000) leaves every completed move — including Recycle-Bin deletes — unrecorded: no CSV, no DB log, Undo does nothing, DB paths point at empty locations. Fix: write each journal entry to SQLite (WAL) per move in small committed batches; CSV/JSON become end-of-run summaries.</td>
     <td class="loc">core/file_ops.py:43,101-104</td><td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">SAFE-02</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+  <tr><td class="id">SAFE-02</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>After Undo, you can never Apply again.</b> Undo restores files but never clears the clusters' <code>applied</code> flags, and global Apply filters applied clusters out — clicking Apply after an undo shows "Nothing to Apply." Reproduced in the running app. Fix: reset <code>applied</code> (and session status) for all clusters touched by the undone apply.</td>
     <td class="loc">ui/main_window.py:359-388 vs 241-245</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-03</td><td><span class="badge b-high">High</span></td>
+  <tr><td class="id">SAFE-03</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Closing the app mid-review discards every verdict.</b> Verdict changes live only in memory until Apply; <code>closeEvent</code> never persists them — despite the README promising "close the app and resume your review session later." Fix: debounced autosave on verdict change + flush on close.</td>
     <td class="loc">ui/main_window.py:235-237,407-416</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-04</td><td><span class="badge b-high">High</span></td>
+  <tr><td class="id">SAFE-04</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Global Apply marks untouched clusters as applied.</b> Clusters whose photos were all still undecided get flagged applied and silently excluded from every future apply. Same root family as SAFE-02. Fix: only mark clusters where at least one photo was processed.</td>
     <td class="loc">ui/main_window.py:279-280</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-05</td><td><span class="badge b-high">High</span></td>
+  <tr><td class="id">SAFE-05</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Non-ASCII folder names silently break scoring and faces.</b> OpenCV's <code>imread</code> can't open Windows paths with Hindi/CJK/emoji characters; it returns <code>None</code>, so every photo in <code>D:\Photos\शादी 2024\</code> gets sharpness 0, faces 0 — and the keep/archive suggestions become effectively random. Fix: <code>cv2.imdecode(np.fromfile(...))</code> everywhere.</td>
     <td class="loc">core/scoring.py:15,27 · core/faces.py:239,448</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-06</td><td><span class="badge b-high">High</span></td>
+  <tr><td class="id">SAFE-06</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Undo wipes the whole journal even when some restores failed.</b> A locked file's failed restore is counted as "skipped" but its journal entry is deleted anyway — the file is stranded in the archive folder with no in-app record. Fix: delete only successfully restored entries; offer retry.</td>
     <td class="loc">core/file_ops.py:229</td><td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">SAFE-07</td><td><span class="badge b-high">High</span></td>
+  <tr><td class="id">SAFE-07</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>One SQLite connection shared across threads with no lock.</b> <code>check_same_thread=False</code> disables the guard, it doesn't add safety; scan-worker writes can interleave with main-thread reads/deletes (e.g. cancel scan → immediately pick new folder) → exceptions or half-committed batches. Fix: per-thread connections or a lock inside SessionStore.</td>
     <td class="loc">core/session_store.py:170 · workers/scan_worker.py:28</td><td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">SAFE-08</td><td><span class="badge b-high">High</span></td>
+  <tr><td class="id">SAFE-08</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Starting a new scan silently destroys the previous session</b> — no warning, even though the home screen just offered "Resume Previous Session." One misclick erases hours of review decisions. Fix: confirmation dialog with the decision count.</td>
     <td class="loc">ui/main_window.py:99-101</td><td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">SAFE-09</td><td><span class="badge b-med">Med</span></td>
@@ -145,10 +148,10 @@
 <h3>Critical performance-feel issues</h3>
 <div class="tablewrap"><table>
   <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Where</th><th>Eff.</th></tr>
-  <tr><td class="id">UX-01</td><td><span class="badge b-crit">Critical</span></td>
+  <tr><td class="id">UX-01</td><td><span class="badge b-crit">Critical</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Image decoding runs on the UI thread in the zoom path.</b> Above 200px zoom, each photo is opened with PIL, Lanczos-resized, re-encoded and decoded again — synchronously, per photo, in a loop. A 40-photo cluster of 12MP files freezes the app for seconds. Also violates the project's own "ui/ = widgets only" rule. Fix: move to a resize worker with per-(photo,size) cache, deliver via signals.</td>
     <td class="loc">ui/review_view.py:600-630,676-690</td><td><span class="badge b-eff">L</span></td></tr>
-  <tr><td class="id">UX-02</td><td><span class="badge b-crit">Critical</span></td>
+  <tr><td class="id">UX-02</td><td><span class="badge b-crit">Critical</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Zoom slider rebuilds the whole grid on every tick</b> — dozens of teardown/recreate cycles per drag, each re-reading images from disk (hitting UX-01). Fix: ~150ms debounce; rescale cached pixmaps during drag, reload on release.</td>
     <td class="loc">ui/review_view.py:371,646-703</td><td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">UX-03</td><td><span class="badge b-high">High</span></td>
@@ -275,11 +278,11 @@
 <h2 id="quality">E. Engineering quality &amp; testing</h2>
 <div class="tablewrap"><table>
   <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
-  <tr><td class="id">TEST-01</td><td><span class="badge b-high">High</span></td>
-    <td><b>Zero tests exist.</b> For a tool that moves and deletes people's photos, the file-operations layer alone justifies a suite. The core/ layering means most targets are pure functions needing no refactor. Priority order: (1) <code>file_ops</code> apply/undo with tmp dirs + mocked send2trash — would have caught SAFE-01/02/06 immediately; (2) <code>clustering.build_clusters</code> incl. threshold edges; (3) <code>events.build_events</code> gap boundaries; (4) <code>scoring.suggest_verdicts</code> + formula regression pin; (5) session_store migration chain v1→v8; (6) <code>paths.resolve_collision</code> + unicode filenames; (7) hashing known-vectors; (8) faces pure-math scorers with stub blendshapes.</td>
+  <tr><td class="id">TEST-01</td><td><span class="badge b-high">High</span> <span class="badge b-good">IN PROGRESS</span></td>
+    <td><b>Core safety coverage is now in place.</b> File operations, persistence, threads, Unicode reads, zoom/preview behavior, replacement-session protection, and clustering threshold edges are tested. Remaining targets: (3) <code>events.build_events</code> gap boundaries; (4) <code>scoring.suggest_verdicts</code> + formula regression pin; (5) session_store migration chain v1→v8; (6) <code>paths.resolve_collision</code> + unicode filenames; (7) hashing known-vectors; (8) faces pure-math scorers with stub blendshapes.</td>
     <td><span class="badge b-eff">L</span></td></tr>
-  <tr><td class="id">TEST-02</td><td><span class="badge b-med">Med</span></td>
-    <td><b>No CI.</b> GitHub Actions: lint (ruff) + pytest on 3.10–3.12 on every push; a weekly job that builds the PyInstaller zip and runs a frozen-exe smoke test (mediapipe packaging re-breaks across version bumps — a known failure class).</td>
+  <tr><td class="id">TEST-02</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>GitHub checks are configured.</b> Every push and pull request runs the unittest suite on Windows with Python 3.10–3.13. A weekly/manual workflow builds the PyInstaller zip and checks that the frozen executable stays running after startup.</td>
     <td><span class="badge b-eff">M</span></td></tr>
   <tr><td class="id">TEST-03</td><td><span class="badge b-med">Med</span></td>
     <td><b>Refactors that unlock testing and reuse:</b> extract ScanWorker's pipeline into a core-level <code>run_scan()</code> (the QThread becomes a 10-line shell); split the 1,078-line ReviewView (FilterController + ImageLoader + shared cluster-label formatter — the flag-string code is duplicated verbatim today); inject the mediapipe model dir; single <code>DEFAULT_PHASH_THRESHOLD</code> constant (currently 8 in two places, 17 in three).</td>
