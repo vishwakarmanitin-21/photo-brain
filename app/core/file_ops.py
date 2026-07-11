@@ -234,6 +234,7 @@ class FileOperator:
 
         restored = 0
         skipped = 0
+        resolved_entry_ids: list[int] = []
 
         # Reverse order for undo
         for entry in reversed(entries):
@@ -242,11 +243,24 @@ class FileOperator:
                 if entry.verdict == "DELETE":
                     log.info("Skipping deleted file (in Recycle Bin): %s", entry.original_path)
                     skipped += 1
+                    if entry.db_id is not None:
+                        # Recycle Bin operations cannot be retried by app Undo;
+                        # the end-of-run JSON remains the permanent audit log.
+                        resolved_entry_ids.append(entry.db_id)
                     continue
 
                 if not os.path.isfile(entry.destination_path):
-                    log.warning("File no longer at destination: %s", entry.destination_path)
-                    skipped += 1
+                    if os.path.isfile(entry.original_path):
+                        # Crash after journaling but before the move, or the
+                        # user already restored it manually: desired state is
+                        # satisfied, so this journal row is resolved.
+                        log.info("File already at original path: %s", entry.original_path)
+                        restored += 1
+                        if entry.db_id is not None:
+                            resolved_entry_ids.append(entry.db_id)
+                    else:
+                        log.warning("File no longer at destination: %s", entry.destination_path)
+                        skipped += 1
                     continue
 
                 # Ensure original directory exists
@@ -263,13 +277,16 @@ class FileOperator:
 
                 shutil.move(entry.destination_path, restore_path)
                 restored += 1
+                if entry.db_id is not None:
+                    resolved_entry_ids.append(entry.db_id)
 
             except Exception as e:
                 log.error("Failed to undo move for %s: %s", entry.photo_id, e)
                 skipped += 1
 
-        # Clear apply log
-        self.store.clear_apply_log(self.session_id)
+        # Keep unresolved rows (locked/missing files) so Undo remains
+        # available and can retry them later.
+        self.store.delete_apply_log_entries(resolved_entry_ids)
 
         # Clean up empty output directories
         for folder_name in (KEEP_FOLDER, ARCHIVE_DUPES_FOLDER, ARCHIVE_LOW_QUALITY_FOLDER):

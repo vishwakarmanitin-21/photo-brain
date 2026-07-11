@@ -118,6 +118,57 @@ class FileOperatorJournalTests(unittest.TestCase):
         self.assertEqual((1, 1), (processed, errors))
         self.assertEqual(set(), self.operator.applied_cluster_ids)
 
+    def test_undo_keeps_failed_restore_for_retry(self):
+        first = self._photo("first.jpg")
+        second = self._photo("second.jpg")
+        self.operator.apply_verdicts([first, second])
+        entries = self.store.get_apply_log(self.session_id)
+        locked_destination = next(
+            entry.destination_path for entry in entries
+            if entry.photo_id == second.id
+        )
+        real_move = shutil.move
+
+        def fail_locked(source, destination):
+            if source == locked_destination:
+                raise OSError("locked")
+            return real_move(source, destination)
+
+        with patch("app.core.file_ops.shutil.move", side_effect=fail_locked):
+            restored, skipped = self.operator.undo_last_apply()
+
+        self.assertEqual((1, 1), (restored, skipped))
+        remaining = self.store.get_apply_log(self.session_id)
+        self.assertEqual([second.id], [entry.photo_id for entry in remaining])
+        self.assertTrue(os.path.exists(locked_destination))
+
+        restored, skipped = self.operator.undo_last_apply()
+        self.assertEqual((1, 0), (restored, skipped))
+        self.assertEqual([], self.store.get_apply_log(self.session_id))
+        self.assertTrue(os.path.exists(second.filepath))
+
+    def test_undo_resolves_write_ahead_plan_when_source_is_already_original(self):
+        photo = self._photo()
+        from app.core.models import ApplyLogEntry
+
+        entry = ApplyLogEntry(
+            photo_id=photo.id,
+            original_path=photo.filepath,
+            destination_path=os.path.join(self.source, "03_KEEP", photo.filename),
+            verdict="KEEP",
+            dup_type="none",
+            destination_folder="03_KEEP",
+            cluster_id="cluster-1",
+            timestamp="2026-07-11T00:00:00+00:00",
+        )
+        self.store.insert_apply_log_entry(self.session_id, entry)
+
+        restored, skipped = self.operator.undo_last_apply()
+
+        self.assertEqual((1, 0), (restored, skipped))
+        self.assertTrue(os.path.exists(photo.filepath))
+        self.assertEqual([], self.store.get_apply_log(self.session_id))
+
 
 if __name__ == "__main__":
     unittest.main()

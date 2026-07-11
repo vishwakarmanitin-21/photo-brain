@@ -519,6 +519,16 @@ class SessionStore:
         self._conn.execute("DELETE FROM apply_log WHERE id=?", (entry_id,))
         self._conn.commit()
 
+    def delete_apply_log_entries(self, entry_ids: list[int]):
+        """Remove only journal entries that undo has conclusively resolved."""
+        if not entry_ids:
+            return
+        with self._transaction() as conn:
+            conn.executemany(
+                "DELETE FROM apply_log WHERE id=?",
+                [(entry_id,) for entry_id in entry_ids],
+            )
+
     def insert_apply_log_batch(self, session_id: str, entries: list[ApplyLogEntry]):
         with self._transaction() as conn:
             conn.executemany(
