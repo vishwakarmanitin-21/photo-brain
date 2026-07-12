@@ -1,4 +1,5 @@
 """Main window with stacked navigation: Setup -> Scan -> Review."""
+import os
 import uuid
 import logging
 
@@ -138,6 +139,7 @@ class MainWindow(QMainWindow):
         self.review_view.apply_cluster_requested.connect(self._on_apply_cluster)
         self.review_view.undo_requested.connect(self._on_undo)
         self.review_view.back_requested.connect(self._go_home)
+        self.review_view.open_log_requested.connect(self._open_log_folder)
         self.review_view.review_state_changed.connect(self._schedule_review_save)
         self.review_view.previews_requested.connect(self._start_preview_worker)
 
@@ -573,6 +575,21 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log.exception("Undo failed")
             QMessageBox.critical(self, "Undo Failed", _friendly_error(e))
+
+    @Slot()
+    def _open_log_folder(self):
+        """Open PhotoBrain's log folder in the system file manager (FEAT-05)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        folder = self.source_folder or self.setup_view.selected_folder()
+        if not folder:
+            QMessageBox.information(
+                self, "No Log Yet",
+                "Scan a folder first — logs are written next to your photos.")
+            return
+        log_dir = get_log_dir(folder)
+        os.makedirs(log_dir, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(log_dir))
 
     # ── Settings ─────────────────────────────────────────
 

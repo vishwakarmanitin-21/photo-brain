@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget,
     QListWidgetItem, QScrollArea, QGridLayout, QLabel, QFrame,
     QPushButton, QSizePolicy, QComboBox, QApplication, QSlider, QCheckBox,
+    QLineEdit, QMessageBox, QFileDialog,
 )
 from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer
 from PySide6.QtGui import (
@@ -75,6 +76,32 @@ EVENT_FILTER_ALL = "All Events"
 
 QUALITY_FILTER_ALL = "All Quality"
 QUALITY_FILTER_LOW = "Low Quality (no dupes)"
+
+# Sort options for the photo grid (FEAT-05). Each maps to a (key, reverse) pair.
+SORT_BEST = "Best first"
+SORT_NEWEST = "Newest first"
+SORT_OLDEST = "Oldest first"
+SORT_LARGEST = "Largest first"
+SORT_SMALLEST = "Smallest first"
+SORT_OPTIONS = [SORT_BEST, SORT_NEWEST, SORT_OLDEST, SORT_LARGEST, SORT_SMALLEST]
+
+
+def sort_photos(photos: list, mode: str) -> list:
+    """Return photos ordered per the chosen sort mode, filepath as a stable
+    tiebreaker so the grid is deterministic (FEAT-05)."""
+    if mode == SORT_NEWEST:
+        return sorted(photos, key=lambda p: (p.exif_datetime or "", p.filepath),
+                      reverse=True)
+    if mode == SORT_OLDEST:
+        # Missing dates sort last, not first, so undated photos don't masquerade
+        # as the oldest.
+        return sorted(photos, key=lambda p: (p.exif_datetime or "￿", p.filepath))
+    if mode == SORT_LARGEST:
+        return sorted(photos, key=lambda p: (-(p.file_size or 0), p.filepath))
+    if mode == SORT_SMALLEST:
+        return sorted(photos, key=lambda p: (p.file_size or 0, p.filepath))
+    # SORT_BEST (default): highest quality first.
+    return sorted(photos, key=lambda p: (-(p.quality_score or 0), p.filepath))
 
 
 HOVER_PREVIEW_MAX = 1000  # hover overlay never needs more than this
@@ -460,6 +487,7 @@ class ReviewView(QWidget):
     apply_cluster_requested = Signal(str)  # cluster_id
     undo_requested = Signal()
     back_requested = Signal()
+    open_log_requested = Signal()
     review_state_changed = Signal()
     previews_requested = Signal(object, int)  # photos, display_size
 
@@ -516,6 +544,20 @@ class ReviewView(QWidget):
         self._shortcuts_btn.setToolTip("Show keyboard shortcuts (F1)")
         self._shortcuts_btn.clicked.connect(self._show_shortcuts)
         toolbar.addWidget(self._shortcuts_btn)
+
+        # Export decisions + open the apply log (FEAT-05).
+        self._export_btn = QPushButton("Export CSV")
+        self._export_btn.setToolTip(
+            "Save the full decision list (keep/archive/delete) as a CSV before "
+            "applying.")
+        self._export_btn.clicked.connect(self._export_decisions)
+        toolbar.addWidget(self._export_btn)
+
+        self._open_log_btn = QPushButton("Open Log")
+        self._open_log_btn.setToolTip(
+            "Open the folder with PhotoBrain's logs and the last apply record.")
+        self._open_log_btn.clicked.connect(self.open_log_requested.emit)
+        toolbar.addWidget(self._open_log_btn)
 
         self._undo_btn = QPushButton("Undo Last Apply")
         self._undo_btn.setEnabled(False)
@@ -619,7 +661,34 @@ class ReviewView(QWidget):
         self._event_filter.setMinimumWidth(200)
         filter_bar.addWidget(self._event_filter)
 
+        filter_bar.addSpacing(15)
+
+        # Filename search (FEAT-05).
+        filter_bar.addWidget(QLabel("Search:"))
+        self._search_box = QLineEdit()
+        self._search_box.setPlaceholderText("filename…")
+        self._search_box.setClearButtonEnabled(True)
+        self._search_box.setMaximumWidth(160)
+        self._search_box.textChanged.connect(self._apply_filters)
+        filter_bar.addWidget(self._search_box)
+
+        filter_bar.addSpacing(15)
+
+        # Sort within the selected group (FEAT-05).
+        filter_bar.addWidget(QLabel("Sort:"))
+        self._sort_combo = QComboBox()
+        self._sort_combo.addItems(SORT_OPTIONS)
+        self._sort_combo.currentTextChanged.connect(self._on_sort_changed)
+        filter_bar.addWidget(self._sort_combo)
+
         filter_bar.addStretch()
+
+        # Overall review progress (FEAT-05).
+        self._progress_label = QLabel("")
+        self._progress_label.setStyleSheet("font-size: 11px; font-weight: bold;")
+        filter_bar.addWidget(self._progress_label)
+
+        filter_bar.addSpacing(10)
 
         self._filter_status = QLabel("")
         self._filter_status.setStyleSheet("font-size: 11px; color: #888;")
@@ -821,6 +890,36 @@ class ReviewView(QWidget):
 
     def _show_shortcuts(self):
         ShortcutsHelpDialog(REVIEW_SHORTCUTS, self).exec()
+
+    def _export_decisions(self):
+        """Write every photo's current decision to a CSV (FEAT-05)."""
+        import csv
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export decision list", "photobrain_decisions.csv",
+            "CSV files (*.csv)")
+        if not path:
+            return
+        try:
+            rows = 0
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow(
+                    ["group", "filename", "verdict", "quality_rating", "filepath"])
+                for cluster in self._all_clusters:
+                    label = cluster_display_label(cluster)
+                    for p in self._cluster_photos.get(cluster.id, []):
+                        writer.writerow([
+                            label, p.filename, p.verdict.value,
+                            quality_rating_100(p.quality_score), p.filepath,
+                        ])
+                        rows += 1
+            QMessageBox.information(
+                self, "Exported",
+                f"Wrote {rows} photo decisions to:\n{path}")
+        except Exception as error:
+            QMessageBox.warning(
+                self, "Export failed",
+                f"Could not write the CSV file.\n\n{error}")
 
     def _open_compare(self):
         """Open the current group in a side-by-side compare view."""
@@ -1082,6 +1181,8 @@ class ReviewView(QWidget):
             "quality": self._quality_filter.currentText(),
             "event_idx": self._event_filter.currentIndex(),
             "hide_singletons": self._hide_singletons.isChecked(),
+            "search": self._search_box.text(),
+            "sort": self._sort_combo.currentText(),
             "cluster_id": current_id,
         }
 
@@ -1103,6 +1204,15 @@ class ReviewView(QWidget):
         if idx is not None and 0 <= idx < self._event_filter.count():
             self._event_filter.setCurrentIndex(idx)
         self._event_filter.blockSignals(False)
+
+        self._search_box.blockSignals(True)
+        self._search_box.setText(state.get("search", "") or "")
+        self._search_box.blockSignals(False)
+        self._sort_combo.blockSignals(True)
+        sort_val = state.get("sort")
+        if sort_val:
+            self._sort_combo.setCurrentText(sort_val)
+        self._sort_combo.blockSignals(False)
 
         self._apply_filters()
 
@@ -1162,6 +1272,18 @@ class ReviewView(QWidget):
                 passing_photo_ids &= face_ids
             else:
                 passing_photo_ids = face_ids
+
+        # Filename search (FEAT-05).
+        query = self._search_box.text().strip().lower()
+        if query:
+            search_ids = {
+                p.id for photos in self._cluster_photos.values() for p in photos
+                if query in p.filename.lower()
+            }
+            passing_photo_ids = (
+                search_ids if passing_photo_ids is None
+                else passing_photo_ids & search_ids
+            )
 
         # Filter clusters: show clusters that have at least one passing photo
         if passing_photo_ids is not None:
@@ -1253,13 +1375,21 @@ class ReviewView(QWidget):
         )
 
     def _show_cluster_photos(self, cluster: Cluster, photos: list[Photo]):
-        if photos is not self._current_photos:
+        ordered = sort_photos(photos, self._sort_combo.currentText())
+        if ordered is not self._current_photos:
             self._preview_pixmaps.clear()
-        self._current_photos = photos
+        self._current_photos = ordered
         self._rebuild_grid_with_zoom()
 
-        if photos:
-            self._select_photo(photos[0].id)
+        if ordered:
+            self._select_photo(ordered[0].id)
+
+    def _on_sort_changed(self):
+        """Re-render the current group in the newly chosen order (FEAT-05)."""
+        if 0 <= self._current_cluster_idx < len(self._clusters):
+            cluster = self._clusters[self._current_cluster_idx]
+            photos = self._cluster_photos.get(cluster.id, [])
+            self._show_cluster_photos(cluster, photos)
 
     # ── Photo selection ──────────────────────────────────
 
@@ -1305,10 +1435,8 @@ class ReviewView(QWidget):
             widget.set_selected(pid in self._selected_ids)
 
     def _get_current_photos(self) -> list[Photo]:
-        if 0 <= self._current_cluster_idx < len(self._clusters):
-            cluster = self._clusters[self._current_cluster_idx]
-            return self._cluster_photos.get(cluster.id, [])
-        return []
+        # The displayed (sorted) order, so keyboard navigation matches the grid.
+        return self._current_photos
 
     def _selected_photo_index(self) -> int:
         photos = self._get_current_photos()
@@ -1542,6 +1670,14 @@ class ReviewView(QWidget):
         self._archive_label.setText(f"{archive} ARCHIVE")
         self._delete_label.setText(f"{delete} DELETE")
         self._review_label.setText(f"{review} REVIEW")
+        self._update_review_progress()
+
+    def _update_review_progress(self):
+        """Overall 'N of M groups reviewed' indicator (FEAT-05)."""
+        total = len(self._all_clusters)
+        reviewed = sum(1 for c in self._all_clusters if getattr(c, "reviewed", False))
+        self._progress_label.setText(
+            f"{reviewed} of {total} groups reviewed" if total else "")
 
     def _update_cluster_list_item(self):
         if 0 <= self._current_cluster_idx < len(self._clusters):
