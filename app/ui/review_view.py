@@ -661,26 +661,42 @@ class ReviewView(QWidget):
         layout.addLayout(status_row)
 
     def _bind_shortcuts(self):
-        QShortcut(QKeySequence("K"), self, self._mark_keep)
-        QShortcut(QKeySequence("A"), self, self._mark_archive)
-        QShortcut(QKeySequence("D"), self, self._mark_delete)
-        QShortcut(QKeySequence("R"), self, self._mark_review)
-        QShortcut(QKeySequence("J"), self, self._next_cluster)
-        QShortcut(QKeySequence(Qt.Key_Down), self, self._next_cluster)
-        QShortcut(QKeySequence(Qt.Key_Up), self, self._prev_cluster)
-        QShortcut(QKeySequence(Qt.Key_Right), self, self._select_next_photo)
-        QShortcut(QKeySequence(Qt.Key_Left), self, self._select_prev_photo)
-        QShortcut(QKeySequence("Ctrl+Return"), self, self.apply_requested.emit)
-        QShortcut(QKeySequence("Ctrl+Z"), self, self._undo_verdict)
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.undo_requested.emit)
-        QShortcut(QKeySequence("F1"), self, self._show_shortcuts)
-        QShortcut(QKeySequence("?"), self, self._show_shortcuts)
-        QShortcut(QKeySequence("C"), self, self._open_compare)
+        # Scope shortcuts to this widget's subtree so they can't fire while
+        # the Setup or Scan screen is showing (both live in the same stacked
+        # widget). The view grabs focus when shown (showEvent) so the keys
+        # work as soon as the review screen appears.
+        self.setFocusPolicy(Qt.StrongFocus)
+
+        def sc(keys, target):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(target)
+
+        sc("K", self._mark_keep)
+        sc("A", self._mark_archive)
+        sc("D", self._mark_delete)
+        sc("R", self._mark_review)
+        sc("J", self._next_cluster)
+        sc(Qt.Key_Down, self._next_cluster)
+        sc(Qt.Key_Up, self._prev_cluster)
+        sc(Qt.Key_Right, self._select_next_photo)
+        sc(Qt.Key_Left, self._select_prev_photo)
+        sc("Ctrl+Return", self.apply_requested.emit)
+        sc("Ctrl+Z", self._undo_verdict)
+        sc("Ctrl+Shift+Z", self.undo_requested.emit)
+        sc("F1", self._show_shortcuts)
+        sc("?", self._show_shortcuts)
+        sc("C", self._open_compare)
         # Zoom shortcuts
-        QShortcut(QKeySequence("+"), self, self._zoom_in)
-        QShortcut(QKeySequence("="), self, self._zoom_in)  # Also + without Shift
-        QShortcut(QKeySequence("-"), self, self._zoom_out)
-        QShortcut(QKeySequence("0"), self, lambda: self._zoom_slider.setValue(BASE_THUMB_SIZE))  # Reset
+        sc("+", self._zoom_in)
+        sc("=", self._zoom_in)  # Also + without Shift
+        sc("-", self._zoom_out)
+        sc("0", lambda: self._zoom_slider.setValue(BASE_THUMB_SIZE))  # Reset
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Take focus so the widget-scoped shortcuts are active immediately.
+        self.setFocus()
 
     # ── Zoom helper methods ──────────────────────────────
 

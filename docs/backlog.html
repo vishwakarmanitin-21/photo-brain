@@ -266,9 +266,9 @@
   <tr><td class="id">UX-06</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Ctrl+Z doesn't undo what users expect.</b> Shipped: <b>Ctrl+Z now undoes your last decision</b> (verdict change) via a LIFO undo stack; the file-restore undo of the last Apply moved to <b>Ctrl+Shift+Z</b> (and the existing "Undo Last Apply" button). The stack captures single, thumbnail-button and bulk changes uniformly by diffing photo state against a shadow on each <code>review_state_changed</code>, so a bulk "Archive All" undoes as one step and undo can't re-record itself. 5 tests (single, LIFO, bulk-as-one, empty-stack, no-self-record).</td>
     <td class="loc">ui/review_view.py</td><td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">UX-07</td><td><span class="badge b-high">High</span></td>
-    <td><b>Global shortcuts fire on the wrong screens.</b> Review shortcuts use window-level context while the review page is always instantiated — Ctrl+Enter during a scan can trigger the apply flow against a store the worker is writing. Fix: widget-scoped shortcut context or screen guards.</td>
-    <td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">UX-07</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>Global shortcuts fired on the wrong screens.</b> Shipped: every review shortcut is now scoped to the review widget subtree (<code>Qt.WidgetWithChildrenShortcut</code>) instead of the window, and the view grabs focus when shown, so K/A/D/Ctrl+Enter etc. can no longer fire while the Setup or Scan screen is up. 2 tests (all shortcuts widget-scoped, view focusable).</td>
+    <td class="loc">ui/review_view.py</td><td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">UX-08</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
     <td><b>Review list is cluttered with noise:</b> five single-photo "clusters" of one auto-KEEP photo each appeared alongside the real duplicate groups, labels are cryptic and non-sequential ("Cluster 8 (3) [EXACT]", "[OK]", "[APPLIED]"), and "cluster/REVIEW" is developer vocabulary. Fix: hide or collapse singletons behind a filter; plain words ("Exact duplicates", "Undecided") + icons.</td>
     <td><span class="badge b-eff">M</span></td></tr>
