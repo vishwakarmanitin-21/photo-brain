@@ -42,6 +42,18 @@ QUALITY_FILTER_ALL = "All Quality"
 QUALITY_FILTER_LOW = "Low Quality (no dupes)"
 
 
+def quality_rating_100(score: float) -> int:
+    """Map the [0,1] quality score to an honest 0–100 rating for display.
+
+    The raw score is a bounded [0,1] value now, but shown as '0.47' it
+    reads like false precision and means nothing to a user. A 0–100
+    rating is the same information without pretending to be exact. The
+    within-group 'Best' badge carries the comparison that actually
+    matters — this number is only a rough per-photo cue.
+    """
+    return max(0, min(100, round(score * 100)))
+
+
 class HoverPreviewWidget(QWidget):
     """Floating preview that shows full-size photo on hover."""
 
@@ -105,9 +117,10 @@ class ThumbnailWidget(QFrame):
     hovered = Signal(str, QPoint)  # photo_id, cursor_pos
     unhovered = Signal()
 
-    def __init__(self, photo: Photo, parent=None):
+    def __init__(self, photo: Photo, parent=None, is_best: bool = False):
         super().__init__(parent)
         self.photo = photo
+        self._is_best = is_best
         self._selected = False
         self._hover_active = False
         self._display_size = BASE_THUMB_SIZE
@@ -141,8 +154,11 @@ class ThumbnailWidget(QFrame):
         name_label.setToolTip(self.photo.filename)
         layout.addWidget(name_label)
 
-        # Score + info row
-        info_parts = [f"Score: {self.photo.quality_score:.1f}"]
+        # Quality rating + info row
+        info_parts = []
+        if self._is_best:
+            info_parts.append("★ Best")
+        info_parts.append(f"Quality: {quality_rating_100(self.photo.quality_score)}/100")
         if self.photo.dup_type != DupType.NONE:
             info_parts.append(self.photo.dup_type.value.upper())
         if self.photo.face_count > 0:
@@ -158,7 +174,8 @@ class ThumbnailWidget(QFrame):
         # Build tooltip with extra metadata
         tooltip_parts = [
             f"File: {self.photo.filename}",
-            f"Score: {self.photo.quality_score:.2f}",
+            f"Quality: {quality_rating_100(self.photo.quality_score)}/100"
+            + (" (best in group)" if self._is_best else ""),
             f"Sharpness: {self.photo.sharpness:.1f}",
             f"Brightness: {self.photo.brightness:.1f}",
             f"Faces: {self.photo.face_count}",
@@ -694,8 +711,19 @@ class ReviewView(QWidget):
         grid_columns = self._get_grid_columns()
         missing_previews: list[Photo] = []
 
+        # "Best in group" cue: the top-scored photo, only when there is a
+        # genuine choice (more than one photo in the cluster).
+        best_photo_id = None
+        if len(self._current_photos) > 1:
+            # Same ordering the verdict ranking uses: highest score, then
+            # smallest filepath — so 'Best' marks the photo kept first.
+            best_photo_id = min(
+                self._current_photos,
+                key=lambda p: (-p.quality_score, p.filepath),
+            ).id
+
         for i, photo in enumerate(self._current_photos):
-            widget = ThumbnailWidget(photo)
+            widget = ThumbnailWidget(photo, is_best=(photo.id == best_photo_id))
             widget.update_size(display_size)
 
             # Load high-res or cached thumbnail
