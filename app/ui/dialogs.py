@@ -160,6 +160,7 @@ class ApplyConfirmDialog(QDialog):
     def __init__(
         self, keep: int, archive: int, delete: int, review: int, parent=None,
         last_copy_delete_count: int = 0,
+        keep_bytes: int = 0, archive_bytes: int = 0, delete_bytes: int = 0,
     ):
         super().__init__(parent)
         self.setWindowTitle("Apply Changes")
@@ -173,20 +174,26 @@ class ApplyConfirmDialog(QDialog):
 
         layout.addSpacing(10)
 
+        def _sz(n):
+            return f" ({_format_bytes(n)})" if n else ""
+
         if keep > 0:
-            keep_label = QLabel(f"  {keep} files will be moved to 03_KEEP")
+            keep_label = QLabel(
+                f"  {keep} files{_sz(keep_bytes)} will be moved to 03_KEEP")
             keep_label.setStyleSheet("font-size: 13px; color: #4CAF50;")
             layout.addWidget(keep_label)
 
         if archive > 0:
-            archive_label = QLabel(f"  {archive} files will be archived (safe, reversible)")
+            archive_label = QLabel(
+                f"  {archive} files{_sz(archive_bytes)} will be archived "
+                "(safe, reversible)")
             archive_label.setStyleSheet("font-size: 13px; color: #FF9800;")
             layout.addWidget(archive_label)
 
         if delete > 0:
             delete_label = QLabel(
-                f"  {delete} files will be sent to the Recycle Bin "
-                "(not undoable in PhotoBrain)"
+                f"  {delete} files{_sz(delete_bytes)} will be sent to the "
+                "Recycle Bin (not undoable in PhotoBrain)"
             )
             delete_label.setStyleSheet("font-size: 13px; color: #F44336; font-weight: bold;")
             layout.addWidget(delete_label)
@@ -195,6 +202,28 @@ class ApplyConfirmDialog(QDialog):
             review_label = QLabel(f"  {review} files are still undecided (will be skipped)")
             review_label.setStyleSheet("font-size: 13px; color: #9E9E9E;")
             layout.addWidget(review_label)
+
+        # Space-savings summary — honest about PhotoBrain's model: archived
+        # files are moved (still on disk), only deletes free space.
+        if delete_bytes or archive_bytes:
+            if delete_bytes:
+                savings = (
+                    f"Frees ~{_format_bytes(delete_bytes)} once you empty the "
+                    f"Recycle Bin.")
+                if archive_bytes:
+                    savings += (
+                        f" Another {_format_bytes(archive_bytes)} is set aside "
+                        "in archive folders (still on disk until you remove them).")
+            else:
+                savings = (
+                    f"{_format_bytes(archive_bytes)} of photos set aside in "
+                    "archive folders (moved, not deleted — still on disk).")
+            savings_label = QLabel(savings)
+            savings_label.setWordWrap(True)
+            savings_label.setStyleSheet(
+                "font-size: 12px; color: #1565C0; padding: 6px; "
+                "background-color: #E3F2FD; border-radius: 4px;")
+            layout.addWidget(savings_label)
 
         layout.addSpacing(10)
 

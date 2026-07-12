@@ -42,6 +42,15 @@ QUALITY_FILTER_ALL = "All Quality"
 QUALITY_FILTER_LOW = "Low Quality (no dupes)"
 
 
+def _format_size(n: float) -> str:
+    n = n or 0
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
 def quality_rating_100(score: float) -> int:
     """Map the [0,1] quality score to an honest 0–100 rating for display.
 
@@ -174,6 +183,7 @@ class ThumbnailWidget(QFrame):
         # Build tooltip with extra metadata
         tooltip_parts = [
             f"File: {self.photo.filename}",
+            f"Size: {_format_size(self.photo.file_size)}",
             f"Quality: {quality_rating_100(self.photo.quality_score)}/100"
             + (" (best in group)" if self._is_best else ""),
             f"Sharpness: {self.photo.sharpness:.1f}",

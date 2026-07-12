@@ -32,6 +32,20 @@ VIEW_SCAN = 1
 VIEW_REVIEW = 2
 
 
+def _verdict_bytes(photos) -> tuple[int, int, int]:
+    """Total file sizes (keep, archive, delete) for the apply summary."""
+    keep = archive = delete = 0
+    for p in photos:
+        size = p.file_size or 0
+        if p.verdict == Verdict.KEEP:
+            keep += size
+        elif p.verdict == Verdict.ARCHIVE:
+            archive += size
+        elif p.verdict == Verdict.DELETE:
+            delete += size
+    return keep, archive, delete
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -367,9 +381,11 @@ class MainWindow(QMainWindow):
                 )
             return
 
+        kb, ab, db = _verdict_bytes(photos)
         dialog = ApplyConfirmDialog(
             keep_count, archive_count, delete_count, review_count, self,
             last_copy_delete_count=len(find_last_copy_deletions(photos)),
+            keep_bytes=kb, archive_bytes=ab, delete_bytes=db,
         )
         if dialog.exec() != QDialog.Accepted:
             return
@@ -432,9 +448,11 @@ class MainWindow(QMainWindow):
             )
             return
 
+        kb, ab, db = _verdict_bytes(photos)
         dialog = ApplyConfirmDialog(
             keep_count, archive_count, delete_count, review_count, self,
             last_copy_delete_count=len(find_last_copy_deletions(photos)),
+            keep_bytes=kb, archive_bytes=ab, delete_bytes=db,
         )
         if dialog.exec() != QDialog.Accepted:
             return
