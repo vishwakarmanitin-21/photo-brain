@@ -170,8 +170,9 @@ class MainWindow(QMainWindow):
         self.thumb_cache = ThumbnailCache(get_thumb_dir(folder))
         self.preview_cache = PreviewCache(get_preview_dir(folder))
 
-        # Switch to scan view and start
-        self.scan_view.reset()
+        # Switch to scan view and start. Phase count drives the weighted
+        # progress bar: 8 phases normally, 7 when face detection is off.
+        self.scan_view.reset(total_phases=8 if self._face_detection_enabled else 7)
         self._navigate(VIEW_SCAN)
         self.scan_view.start_timer()
 

@@ -13,6 +13,9 @@ class ScanView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._elapsed_seconds = 0
+        self._total_phases = 8
+        self._phase_index = 0
+        self._phase_fraction = 0.0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._build_ui()
@@ -135,7 +138,10 @@ class ScanView(QWidget):
     def stop_timer(self):
         self._timer.stop()
 
-    def reset(self):
+    def reset(self, total_phases: int = 8):
+        self._total_phases = max(1, total_phases)
+        self._phase_index = 0
+        self._phase_fraction = 0.0
         self._progress.setValue(0)
         self._phase_label.setText("Preparing...")
         self._file_label.setText("")
@@ -166,8 +172,16 @@ class ScanView(QWidget):
 
     @Slot(str, int, int)
     def update_progress(self, phase: str, current: int, total: int):
-        if total > 0:
-            self._progress.setValue(int(current / total * 100))
+        # Fraction *within* the current phase — feeds the weighted overall bar.
+        self._phase_fraction = (current / total) if total > 0 else 0.0
+        self._refresh_overall_progress()
+
+    def _refresh_overall_progress(self):
+        # Overall = completed phases + progress through the current one, so the
+        # bar advances monotonically instead of resetting to 0 each phase.
+        completed = max(0, self._phase_index - 1)
+        overall = (completed + self._phase_fraction) / self._total_phases
+        self._progress.setValue(int(min(1.0, overall) * 100))
 
     @Slot(str)
     def update_current_file(self, filename: str):
@@ -181,7 +195,11 @@ class ScanView(QWidget):
 
     @Slot(str)
     def update_phase(self, phase: str):
-        self._phase_label.setText(phase)
+        self._phase_index = min(self._phase_index + 1, self._total_phases)
+        self._phase_fraction = 0.0
+        self._phase_label.setText(
+            f"Phase {self._phase_index}/{self._total_phases}: {phase}")
+        self._refresh_overall_progress()
 
     def _tick(self):
         self._elapsed_seconds += 1

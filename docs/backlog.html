@@ -272,8 +272,8 @@
   <tr><td class="id">UX-08</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
     <td><b>Review list is cluttered with noise:</b> five single-photo "clusters" of one auto-KEEP photo each appeared alongside the real duplicate groups, labels are cryptic and non-sequential ("Cluster 8 (3) [EXACT]", "[OK]", "[APPLIED]"), and "cluster/REVIEW" is developer vocabulary. Fix: hide or collapse singletons behind a filter; plain words ("Exact duplicates", "Undecided") + icons.</td>
     <td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">UX-09</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
-    <td><b>Scan progress bar fills to 100% then resets for each phase</b> (~8 times per scan) — it read 100% while "Detecting faces…" was still running. No overall ETA. Fix: weighted overall progress + "Phase 3/8" label.</td>
+  <tr><td class="id">UX-09</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>Scan progress bar fills to 100% then resets for each phase</b> (~8 times per scan) — it read 100% while "Detecting faces…" was still running. No overall ETA. Fix: weighted overall progress + "Phase 3/8" label. <b>Shipped:</b> one overall bar that advances monotonically across all phases (completed-phases + fraction-through-current) and a "Phase N/M: …" label; phase count is 8, or 7 when face detection is off — the bar no longer resets or reads 100% mid-scan.</td>
     <td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">UX-10</td><td><span class="badge b-med">Med</span></td>
     <td>Enter confirms the apply dialog by default even when deletes are present (two accidental keystrokes to Recycle Bin); apply resets filters and jumps to cluster 0, losing your place; clean-scan empty state says "No clusters match filters" instead of "your library is already clean"; raw <code>WinError</code> text surfaces in user dialogs.</td>
