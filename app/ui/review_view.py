@@ -11,6 +11,7 @@ from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer
 from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
+from app.core.scoring import is_low_quality_singleton
 
 log = logging.getLogger("photobrain.review_view")
 
@@ -36,6 +37,9 @@ FACE_FILTER_NO_FACES = "No Faces"
 FACE_FILTER_GROUP = "Group Shots (3+)"
 
 EVENT_FILTER_ALL = "All Events"
+
+QUALITY_FILTER_ALL = "All Quality"
+QUALITY_FILTER_LOW = "Low Quality (no dupes)"
 
 
 class HoverPreviewWidget(QWidget):
@@ -433,6 +437,19 @@ class ReviewView(QWidget):
 
         filter_bar.addSpacing(15)
 
+        filter_bar.addWidget(QLabel("Quality:"))
+        self._quality_filter = QComboBox()
+        self._quality_filter.addItems([QUALITY_FILTER_ALL, QUALITY_FILTER_LOW])
+        self._quality_filter.setToolTip(
+            "Low Quality: standalone photos (no duplicates) that are blurry "
+            "or badly exposed — suggested for archiving."
+        )
+        self._quality_filter.currentTextChanged.connect(self._apply_filters)
+        self._quality_filter.setMinimumWidth(150)
+        filter_bar.addWidget(self._quality_filter)
+
+        filter_bar.addSpacing(15)
+
         filter_bar.addWidget(QLabel("Event:"))
         self._event_filter = QComboBox()
         self._event_filter.addItem(EVENT_FILTER_ALL)
@@ -788,6 +805,11 @@ class ReviewView(QWidget):
         self._face_filter.setCurrentIndex(0)
         self._face_filter.blockSignals(False)
 
+        # Reset quality filter
+        self._quality_filter.blockSignals(True)
+        self._quality_filter.setCurrentIndex(0)
+        self._quality_filter.blockSignals(False)
+
         self._apply_filters()
 
     @Slot(str, str)
@@ -800,8 +822,17 @@ class ReviewView(QWidget):
 
     # ── Filtering ────────────────────────────────────────
 
+    def _low_quality_photo_ids(self) -> set[str]:
+        """Standalone (single-photo cluster) photos flagged as low quality."""
+        ids: set[str] = set()
+        for members in self._cluster_photos.values():
+            if len(members) == 1 and is_low_quality_singleton(members[0]):
+                ids.add(members[0].id)
+        return ids
+
     def _apply_filters(self):
         face_filter = self._face_filter.currentText()
+        quality_filter = self._quality_filter.currentText()
         event_idx = self._event_filter.currentIndex()
         event_id = self._event_filter.currentData() if event_idx > 0 else None
 
@@ -811,6 +842,14 @@ class ReviewView(QWidget):
         # Event filter
         if event_id:
             passing_photo_ids = self._event_photos.get(event_id, set()).copy()
+
+        # Quality filter (low-quality standalone photos)
+        if quality_filter == QUALITY_FILTER_LOW:
+            low_ids = self._low_quality_photo_ids()
+            passing_photo_ids = (
+                low_ids if passing_photo_ids is None
+                else passing_photo_ids & low_ids
+            )
 
         # Face filter
         if face_filter != FACE_FILTER_ALL:

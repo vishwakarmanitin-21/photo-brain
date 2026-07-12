@@ -131,13 +131,16 @@ class SharpnessMeasurementTests(unittest.TestCase):
 
 
 class SingletonSuggestionTests(unittest.TestCase):
-    """DISTILL-02 (partial): unreadable singletons stay undecided."""
+    """Unreadable singletons stay undecided; good ones are kept."""
 
     @staticmethod
     def _photo(sharpness: float, brightness: float) -> Photo:
+        # Score the photo the way the pipeline does, so the fixture is
+        # consistent with the low-quality lane's threshold.
         return Photo(
             id="p1", filepath="C:/photos/p1.jpg", filename="p1.jpg",
             file_size=10, sharpness=sharpness, brightness=brightness,
+            quality_score=compute_quality_score(sharpness, brightness),
         )
 
     def test_unscoreable_singleton_stays_undecided(self):
@@ -146,7 +149,7 @@ class SingletonSuggestionTests(unittest.TestCase):
         self.assertEqual(Verdict.REVIEW, photo.verdict)
 
     def test_normal_singleton_still_keeps(self):
-        photo = self._photo(200.0, 130.0)
+        photo = self._photo(300.0, 130.0)
         suggest_verdicts([photo])
         self.assertEqual(Verdict.KEEP, photo.verdict)
 

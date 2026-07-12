@@ -139,6 +139,19 @@ def rescore_with_faces(photo: "Photo") -> float:
 # worse, so keeping it just clutters the KEEP set with an inferior near-dup.
 KEEP_GAP = 0.05
 
+# A standalone photo (no duplicates) scoring below this on the [0,1] scale is
+# genuinely low quality — clearly blurry or badly exposed — and is suggested
+# for archiving instead of auto-kept. Deliberately conservative: a decent
+# no-face snapshot lands around 0.40+, so only real junk falls below. The
+# suggestion is ARCHIVE (a reversible move), never DELETE.
+LOW_QUALITY_THRESHOLD = 0.25
+
+
+def is_low_quality_singleton(photo: Photo) -> bool:
+    """True if a standalone photo is scoreable but clearly low quality."""
+    scoreable = photo.sharpness > 0.0 or photo.brightness > 0.0
+    return scoreable and photo.quality_score < LOW_QUALITY_THRESHOLD
+
 
 def effective_keep_count(photos: list[Photo], max_keep: int) -> int:
     """How many top photos to keep, given the quality gaps between them.
@@ -169,9 +182,13 @@ def suggest_verdicts(
     """Sort by quality descending, mark top N as KEEP, rest as ARCHIVE.
 
     Respects user_override: photos manually set by the user are not changed.
-    Single-photo clusters get KEEP — except unreadable/unscoreable files
-    (no sharpness AND no brightness), which stay undecided so the user
-    actually looks at them instead of silently keeping a broken file.
+    Single-photo clusters (standalone photos, no duplicates) get KEEP,
+    except:
+      - unreadable/unscoreable files stay undecided (REVIEW) so the user
+        actually looks at them instead of silently keeping a broken file;
+      - clearly low-quality photos (blurry/badly exposed) are suggested
+        for ARCHIVE — the "distill standalone junk" behavior. ARCHIVE is
+        a reversible move, so a misfire costs one undo, never a photo.
     """
     if len(photos) <= 1:
         for p in photos:
@@ -179,6 +196,8 @@ def suggest_verdicts(
                 continue
             if p.sharpness <= 0.0 and p.brightness <= 0.0:
                 p.verdict = Verdict.REVIEW
+            elif is_low_quality_singleton(p):
+                p.verdict = Verdict.ARCHIVE
             else:
                 p.verdict = Verdict.KEEP
         return photos
