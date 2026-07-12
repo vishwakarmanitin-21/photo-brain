@@ -278,8 +278,8 @@
   <tr><td class="id">UX-10</td><td><span class="badge b-med">Med</span></td>
     <td>Enter confirms the apply dialog by default even when deletes are present (two accidental keystrokes to Recycle Bin); apply resets filters and jumps to cluster 0, losing your place; clean-scan empty state says "No clusters match filters" instead of "your library is already clean"; raw <code>WinError</code> text surfaces in user dialogs.</td>
     <td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">UX-11</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
-    <td><b>Folder can only come from the Browse dialog</b> — the path box is read-only, typed/pasted paths are ignored, no drag-and-drop of a folder onto the window. Fix: editable path + drag-drop.</td>
+  <tr><td class="id">UX-11</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>Folder can only come from the Browse dialog</b> — the path box is read-only, typed/pasted paths are ignored, no drag-and-drop of a folder onto the window. Fix: editable path + drag-drop. <b>Shipped:</b> path box is editable (typed/pasted paths validated, surrounding quotes stripped); dropping a folder (or a file inside one) onto the window selects it; one _set_folder() entry point drives Browse, typing, and drop alike.</td>
     <td><span class="badge b-eff">S</span></td></tr>
   <tr><td class="id">UX-12</td><td><span class="badge b-med">Med</span></td>
     <td><b>Accessibility:</b> verdict is encoded almost entirely by green/orange/red border color — near-identical for red-green colorblind users at review speed; keyboard-only grid navigation is incomplete (no vertical movement within the grid). Fix: letter/icon badge per verdict corner + grid-aware arrows.</td>
@@ -290,8 +290,8 @@
   <tr><td class="id">UX-14</td><td><span class="badge b-med">Med</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
     <td><b>Settings speak engineering:</b> "pHash Threshold" with a raw 1–30 spinner ("Lower = stricter. Higher = broader grouping"). A non-technical user cannot map 17 → outcome. Fix: three presets ("Only near-identical / Similar shots / Loose grouping") with the number under Advanced.</td>
     <td><span class="badge b-eff">S</span></td></tr>
-  <tr><td class="id">UX-15</td><td><span class="badge b-med">Med</span></td>
-    <td><b>No first-run guidance</b> (verified: home screen is title + folder box only). Nothing explains scan→review→apply, that files get <i>moved</i> into <code>03_KEEP</code>/archive folders, or that a <code>.photobrain</code> folder appears inside the photo directory. Fix: 3 lines of "How it works" + a note about the folders that will be created.</td>
+  <tr><td class="id">UX-15</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>No first-run guidance</b> (verified: home screen is title + folder box only). Nothing explains scan→review→apply, that files get <i>moved</i> into <code>03_KEEP</code>/archive folders, or that a <code>.photobrain</code> folder appears inside the photo directory. Fix: 3 lines of "How it works" + a note about the folders that will be created. <b>Shipped:</b> home screen now shows a "How it works" panel — the scan→review→apply steps, that kept photos are <i>moved</i> into 03_KEEP/archive folders and deletes go to the Recycle Bin, and that a .photobrain folder is created for progress (originals untouched until Apply).</td>
     <td><span class="badge b-eff">S</span></td></tr>
 </table></div>
 

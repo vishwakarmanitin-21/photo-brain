@@ -49,6 +49,7 @@ class SetupView(QWidget):
         super().__init__(parent)
         self._folder_path = ""
         self._build_ui()
+        self.setAcceptDrops(True)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -79,9 +80,10 @@ class SetupView(QWidget):
         # Folder picker row
         row = QHBoxLayout()
         self._path_edit = QLineEdit()
-        self._path_edit.setReadOnly(True)
-        self._path_edit.setPlaceholderText("Select a folder containing photos...")
+        self._path_edit.setPlaceholderText(
+            "Select, type, or drag a folder containing photos...")
         self._path_edit.setMinimumWidth(400)
+        self._path_edit.editingFinished.connect(self._on_path_typed)
         row.addWidget(self._path_edit)
 
         browse_btn = QPushButton("Browse...")
@@ -130,6 +132,29 @@ class SetupView(QWidget):
         settings_btn.clicked.connect(self.settings_requested.emit)
         layout.addWidget(settings_btn, alignment=Qt.AlignCenter)
 
+        layout.addSpacing(28)
+
+        # First-run guidance — what the app does and what it will create.
+        how = QLabel(
+            "<b>How it works</b><br>"
+            "1. <b>Scan</b> — PhotoBrain groups near-duplicate shots and rates each one.<br>"
+            "2. <b>Review</b> — you decide what to keep, archive, or delete.<br>"
+            "3. <b>Apply</b> — kept photos are <i>moved</i> into a <code>03_KEEP</code> "
+            "folder, archived ones into archive folders, and deletes go to the "
+            "Recycle Bin.<br>"
+            "<span style='color:#999;'>A small <code>.photobrain</code> folder is created "
+            "inside your photo folder to remember progress. Your originals are never "
+            "changed until you press Apply.</span>"
+        )
+        how.setWordWrap(True)
+        how.setAlignment(Qt.AlignLeft)
+        how.setMaximumWidth(460)
+        how.setStyleSheet(
+            "font-size: 12px; color: #666; background: #f5f5f5; "
+            "border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px 16px;"
+        )
+        layout.addWidget(how, alignment=Qt.AlignCenter)
+
         layout.addSpacerItem(
             QSpacerItem(20, 60, QSizePolicy.Minimum, QSizePolicy.Expanding)
         )
@@ -141,15 +166,49 @@ class SetupView(QWidget):
         )
         if not folder:
             return
-        self._folder_path = folder
-        self._path_edit.setText(folder)
+        self._set_folder(folder)
 
+    def _on_path_typed(self):
+        """Accept a folder the user typed or pasted into the path box."""
+        text = self._path_edit.text().strip().strip('"')
+        if text and text != self._folder_path:
+            self._set_folder(text)
+
+    def _set_folder(self, folder: str):
+        """Single entry point for choosing a folder — from Browse, typing,
+        or drag-and-drop. Validates, then counts off the UI thread."""
+        folder = os.path.normpath(folder)
+        self._path_edit.setText(folder)
+        if not os.path.isdir(folder):
+            self._folder_path = ""
+            self._stop_count()
+            self._count_label.setText("That folder doesn't exist.")
+            self._scan_btn.setEnabled(False)
+            self._resume_btn.setVisible(False)
+            return
+
+        self._folder_path = folder
         # Check for existing session (cheap, stays on the UI thread)
         self._resume_btn.setVisible(has_existing_session(folder))
-
         # Count files off the UI thread so a huge/network folder can't freeze
         # the app mid-click. Show immediate feedback while it runs.
         self._start_count(folder)
+
+    def dragEnterEvent(self, event):
+        mime = event.mimeData()
+        if mime.hasUrls() and any(u.isLocalFile() for u in mime.urls()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            folder = path if os.path.isdir(path) else os.path.dirname(path)
+            if folder:
+                self._set_folder(folder)
+                event.acceptProposedAction()
+                return
 
     def _start_count(self, folder: str):
         self._stop_count()
