@@ -5,7 +5,7 @@ from typing import Optional
 
 import cv2
 
-from app.core.image_io import read_image
+from app.core.image_io import read_image, verify_decodable
 from app.core.models import Photo, Verdict, DupType
 
 log = logging.getLogger("photobrain.scoring")
@@ -111,6 +111,11 @@ def score_photo(filepath: str) -> tuple[float, float, float]:
         gray = read_image(filepath, cv2.IMREAD_GRAYSCALE)
         if gray is None:
             log.warning("Cannot read image for scoring: %s", filepath)
+        elif not verify_decodable(filepath):
+            # Truncated/corrupt: OpenCV gave us partial pixels, but the file
+            # is damaged. Leave it unscoreable so it surfaces for review
+            # instead of being silently kept.
+            log.warning("Skipping score for damaged image: %s", filepath)
         else:
             sharpness = _sharpness_from_gray(gray)
             brightness = float(gray.mean())
