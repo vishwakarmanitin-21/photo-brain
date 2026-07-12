@@ -6,7 +6,9 @@ from typing import Callable, Optional
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.hashing import compute_sha256, compute_phash
-from app.core.scoring import score_photo, suggest_verdicts, rescore_with_faces
+from app.core.scoring import (
+    score_photo, suggest_verdicts, rescore_with_faces, effective_keep_count,
+)
 from app.core.clustering import build_clusters, group_by_sha256
 from app.core.faces import detect_faces, analyze_expressions
 from app.core.events import extract_exif_datetime, build_events
@@ -259,8 +261,13 @@ def assign_verdicts(
         if not members:
             continue
 
-        # For exact-dup-only clusters, keep only 1 regardless of setting
-        keep_n = 1 if cluster.is_exact_dup_group else keep_per_cluster
+        # For exact-dup-only clusters, keep only 1 regardless of setting.
+        # Otherwise start from the user's ceiling but trim it when the
+        # lower-ranked members are clearly worse than the best.
+        if cluster.is_exact_dup_group:
+            keep_n = 1
+        else:
+            keep_n = effective_keep_count(members, keep_per_cluster)
         suggest_verdicts(members, keep_count=keep_n)
 
         cluster.keep_count = sum(1 for p in members if p.verdict == Verdict.KEEP)

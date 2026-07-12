@@ -134,6 +134,35 @@ def rescore_with_faces(photo: "Photo") -> float:
     )
 
 
+# Max quality gap (on the [0,1] score) within which a lower-ranked photo is
+# still worth keeping alongside the best. Beyond this the runner-up is clearly
+# worse, so keeping it just clutters the KEEP set with an inferior near-dup.
+KEEP_GAP = 0.05
+
+
+def effective_keep_count(photos: list[Photo], max_keep: int) -> int:
+    """How many top photos to keep, given the quality gaps between them.
+
+    Always keeps the best photo, then keeps each next-ranked photo (up to
+    max_keep) only while it stays within KEEP_GAP of the best. Near-equal
+    alternates are all kept; a clearly-worse runner-up trims the set back
+    toward 1. max_keep is the ceiling — the user's setting still caps it.
+    """
+    if not photos:
+        return 0
+    if max_keep <= 1:
+        return max(0, max_keep)
+    ranked = sorted(photos, key=lambda p: (-p.quality_score, p.filepath))
+    best = ranked[0].quality_score
+    keep = 1
+    for p in ranked[1:max_keep]:
+        if best - p.quality_score <= KEEP_GAP:
+            keep += 1
+        else:
+            break
+    return keep
+
+
 def suggest_verdicts(
     photos: list[Photo], keep_count: int = 2
 ) -> list[Photo]:
