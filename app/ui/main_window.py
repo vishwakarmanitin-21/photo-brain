@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Slot
 
+from app.util.app_settings import AppSettings
+
 from app.ui.setup_view import SetupView
 from app.ui.scan_view import ScanView
 from app.ui.review_view import ReviewView
@@ -78,11 +80,13 @@ class MainWindow(QMainWindow):
         self.preview_cache: PreviewCache | None = None
         self.preview_workers: set[PreviewWorker] = set()
 
-        # Settings defaults
-        self._phash_threshold = 17
-        self._keep_per_cluster = 2
-        self._event_gap_hours = 4.0
-        self._face_detection_enabled = True
+        # Settings defaults — seeded from saved preferences so choices persist
+        # across launches (UX-13).
+        self._settings = AppSettings()
+        self._phash_threshold = self._settings.threshold(17)
+        self._keep_per_cluster = self._settings.keep_per_cluster(2)
+        self._event_gap_hours = self._settings.event_gap_hours(4.0)
+        self._face_detection_enabled = self._settings.face_detection(True)
 
         self._review_save_timer = QTimer(self)
         self._review_save_timer.setSingleShot(True)
@@ -91,6 +95,17 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._connect_signals()
+        self._restore_geometry()
+
+    def _restore_geometry(self):
+        geo = self._settings.geometry()
+        if geo is not None:
+            try:
+                if self.restoreGeometry(geo):
+                    return
+            except Exception:
+                log.exception("Failed to restore window geometry")
+        self.resize(1200, 800)
 
     def _build_ui(self):
         central = QWidget()
@@ -102,6 +117,10 @@ class MainWindow(QMainWindow):
         self.setup_view = SetupView()
         self.scan_view = ScanView()
         self.review_view = ReviewView()
+
+        # Apply saved review preferences (UX-13).
+        self.review_view.set_hide_singletons(self._settings.hide_singletons(True))
+        self.review_view.set_zoom(self._settings.zoom(self.review_view.current_zoom()))
 
         self.stack.addWidget(self.setup_view)   # 0
         self.stack.addWidget(self.scan_view)    # 1
@@ -572,10 +591,26 @@ class MainWindow(QMainWindow):
             self._keep_per_cluster = dialog.keep_count()
             self._event_gap_hours = dialog.event_gap_hours()
             self._face_detection_enabled = dialog.face_detection_enabled()
+            # Remember these as the defaults for next launch (UX-13).
+            self._settings.save_scan_defaults(
+                self._phash_threshold, self._keep_per_cluster,
+                self._event_gap_hours, self._face_detection_enabled,
+            )
 
     # ── Cleanup ──────────────────────────────────────────
 
+    def _save_preferences(self):
+        """Persist window + review preferences so they survive a restart."""
+        try:
+            self._settings.save_geometry(self.saveGeometry())
+            self._settings.save_zoom(self.review_view.current_zoom())
+            self._settings.save_hide_singletons(
+                self.review_view.hide_singletons_enabled())
+        except Exception:
+            log.exception("Failed to save preferences")
+
     def closeEvent(self, event):
+        self._save_preferences()
         if self._review_save_timer.isActive():
             self._review_save_timer.stop()
         if self.stack.currentIndex() == VIEW_REVIEW:

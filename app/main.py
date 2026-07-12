@@ -28,7 +28,8 @@ def main() -> int:
     window = MainWindow()
     window.setWindowTitle("PhotoBrain Desktop")
     window.setWindowIcon(icon)
-    window.resize(1200, 800)
+    # Window size/position is restored from saved preferences inside
+    # MainWindow (falling back to a sensible default) — UX-13.
     window.show()
 
     return app.exec()

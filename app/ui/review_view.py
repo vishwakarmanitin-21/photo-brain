@@ -1041,6 +1041,19 @@ class ReviewView(QWidget):
                 ids.add(members[0].id)
         return ids
 
+    def current_zoom(self) -> int:
+        """Current thumbnail zoom (for persistence, UX-13)."""
+        return self._zoom_slider.value()
+
+    def set_zoom(self, value: int) -> None:
+        self._zoom_slider.setValue(int(value))
+
+    def set_hide_singletons(self, on: bool) -> None:
+        self._hide_singletons.setChecked(bool(on))
+
+    def hide_singletons_enabled(self) -> bool:
+        return self._hide_singletons.isChecked()
+
     def get_view_state(self) -> dict:
         """Snapshot the filters and selected group so a reload (e.g. after
         Apply) can put the user back where they were (UX-10)."""
