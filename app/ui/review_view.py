@@ -217,7 +217,7 @@ class ThumbnailWidget(QFrame):
         self._image_label = QLabel()
         self._image_label.setFixedSize(self._display_size, self._display_size)
         self._image_label.setAlignment(Qt.AlignCenter)
-        self._image_label.setStyleSheet("background-color: #f0f0f0;")
+        self._image_label.setStyleSheet("background-color: palette(alternate-base);")
         self._image_label.setText("Loading...")
         layout.addWidget(self._image_label, alignment=Qt.AlignCenter)
 
@@ -391,7 +391,7 @@ class ThumbnailWidget(QFrame):
 
         self.setStyleSheet(
             f"ThumbnailWidget {{ border: {border_width}px solid {border_color}; "
-            f"border-radius: 4px; background-color: white; {outline} }}"
+            f"border-radius: 4px; background-color: palette(base); {outline} }}"
         )
 
         # Verdict label color

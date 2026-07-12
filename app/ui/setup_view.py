@@ -149,9 +149,12 @@ class SetupView(QWidget):
         how.setWordWrap(True)
         how.setAlignment(Qt.AlignLeft)
         how.setMaximumWidth(460)
+        # palette() roles so the panel follows the Windows light/dark theme
+        # instead of being a fixed light-grey patch (UX-13).
         how.setStyleSheet(
-            "font-size: 12px; color: #666; background: #f5f5f5; "
-            "border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px 16px;"
+            "font-size: 12px; color: palette(text); "
+            "background: palette(alternate-base); "
+            "border: 1px solid palette(mid); border-radius: 6px; padding: 12px 16px;"
         )
         layout.addWidget(how, alignment=Qt.AlignCenter)
 

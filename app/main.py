@@ -22,6 +22,11 @@ def main() -> int:
     app.setApplicationName("PhotoBrain")
     app.setOrganizationName("PhotoBrain")
 
+    # Fusion honours the system palette, so the app follows the Windows
+    # light/dark setting instead of forcing a light look (UX-13). Panels that
+    # set their own colours use palette() roles so they follow suit.
+    app.setStyle("Fusion")
+
     icon = QIcon(_icon_path())
     app.setWindowIcon(icon)
 
