@@ -75,8 +75,8 @@
   .filter-grid { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(4, minmax(120px, 1fr)) auto;
                  gap: 10px; align-items: end; }
   .filter-field { display: grid; gap: 4px; min-width: 0; }
-  .filter-field label { color: var(--muted); font-size: 11px; font-weight: 700;
-                        letter-spacing: .04em; text-transform: uppercase; }
+  .filter-field > label, .filter-field-label { color: var(--muted); font-size: 11px;
+                        font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
   .filter-field input, .filter-field select, .filter-clear {
     width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 7px;
     padding: 7px 9px; background: var(--bg); color: var(--fg); font: inherit;
@@ -86,6 +86,16 @@
   }
   .filter-clear { width: auto; cursor: pointer; color: var(--accent); font-weight: 600; }
   .filter-clear:hover { background: var(--accent-soft); }
+  .status-set { display: flex; flex-wrap: wrap; gap: 4px 6px; min-height: 38px;
+    align-content: center; padding: 3px 0; }
+  .status-set label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px;
+    font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: none;
+    letter-spacing: 0; user-select: none; background: var(--bg); }
+  .status-set label:has(input:checked) { color: var(--accent); border-color: var(--accent);
+    background: var(--accent-soft); }
+  .status-set input { width: auto; min-height: 0; margin: 0; accent-color: var(--accent); }
+  .status-set label:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
   .filter-clear:disabled { cursor: default; color: var(--muted); opacity: .55; }
   .filter-summary { display: flex; justify-content: space-between; gap: 12px;
                     margin-top: 10px; color: var(--muted); font-size: 13px; }
@@ -138,11 +148,12 @@
       </select>
     </div>
     <div class="filter-field">
-      <label for="filter-status">Status</label>
-      <select id="filter-status">
-        <option value="">All statuses</option><option value="open">Open</option>
-        <option value="in-progress">In progress</option><option value="shipped">Shipped</option>
-      </select>
+      <span class="filter-field-label" id="filter-status-label">Status</span>
+      <div class="status-set" role="group" aria-labelledby="filter-status-label" id="filter-status">
+        <label><input type="checkbox" value="open" checked> Open</label>
+        <label><input type="checkbox" value="in-progress" checked> In progress</label>
+        <label><input type="checkbox" value="shipped"> Shipped</label>
+      </div>
     </div>
     <div class="filter-field">
       <label for="filter-effort">Effort</label>
@@ -522,9 +533,14 @@
     search: document.querySelector('#filter-search'),
     category: document.querySelector('#filter-category'),
     priority: document.querySelector('#filter-priority'),
-    status: document.querySelector('#filter-status'),
     effort: document.querySelector('#filter-effort'),
   };
+  const statusBoxes = [...document.querySelectorAll('#filter-status input[type=checkbox]')];
+  const STATUS_DEFAULT = { open: true, 'in-progress': true, shipped: false };
+  const statusDefaultsApplied = () =>
+    statusBoxes.every(box => box.checked === STATUS_DEFAULT[box.value]);
+  const resetStatus = () =>
+    statusBoxes.forEach(box => { box.checked = STATUS_DEFAULT[box.value]; });
   const panel = document.querySelector('#backlog-filters');
   const clearButton = document.querySelector('#filter-clear');
   const count = document.querySelector('#filter-count');
@@ -569,14 +585,18 @@
       search: controls.search.value.trim().toLowerCase(),
       category: controls.category.value,
       priority: controls.priority.value,
-      status: controls.status.value,
       effort: controls.effort.value,
     };
+    // Multi-select: an item's status must be among the checked boxes. All
+    // unchecked would hide everything, so treat that as "no status filter".
+    const allowedStatuses = new Set(
+      statusBoxes.filter(box => box.checked).map(box => box.value)
+    );
+    const statusActive = allowedStatuses.size > 0 && allowedStatuses.size < statusBoxes.length;
     let visible = 0;
 
     items.forEach(item => {
-      const statusMatches = !selected.status ||
-        (selected.status === 'open' ? item.status !== 'shipped' : item.status === selected.status);
+      const statusMatches = allowedStatuses.size === 0 || allowedStatuses.has(item.status);
       const matches = (!selected.search || item.text.includes(selected.search)) &&
         (!selected.category || item.category === selected.category) &&
         (!selected.priority || item.priority === selected.priority) &&
@@ -589,15 +609,17 @@
     wrappers.forEach(wrapper => {
       wrapper.hidden = !items.some(item => item.wrapper === wrapper && !item.row.hidden);
     });
-    const active = Object.values(selected).some(Boolean);
+    const active = Object.values(selected).some(Boolean) || !statusDefaultsApplied();
     clearButton.disabled = !active;
     count.textContent = `Showing ${visible} of ${items.length} backlog items`;
     empty.hidden = visible !== 0;
   }
 
   Object.values(controls).forEach(control => control.addEventListener('input', applyFilters));
+  statusBoxes.forEach(box => box.addEventListener('change', applyFilters));
   clearButton.addEventListener('click', () => {
     Object.values(controls).forEach(control => { control.value = ''; });
+    resetStatus();
     applyFilters();
     controls.search.focus();
   });
