@@ -13,6 +13,7 @@ from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServ
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.scoring import is_low_quality_singleton
 from app.ui.dialogs import ShortcutsHelpDialog
+from app.ui.compare_dialog import CompareDialog
 
 # Single source of truth for the review shortcuts — used to bind them AND
 # to populate the discoverable help dialog, so the two never drift.
@@ -21,6 +22,7 @@ REVIEW_SHORTCUTS = [
     ("A", "Archive the selected photo"),
     ("D", "Delete the selected photo (to Recycle Bin)"),
     ("R", "Reset the selected photo to undecided"),
+    ("C", "Compare this group's photos side by side"),
     ("← / →", "Previous / next photo in the group"),
     ("↑ / J / ↓", "Previous / next group"),
     ("Ctrl+Z", "Undo your last decision"),
@@ -421,6 +423,12 @@ class ReviewView(QWidget):
         self._title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         toolbar.addWidget(self._title_label, stretch=1)
 
+        self._compare_btn = QPushButton("⇆ Compare")
+        self._compare_btn.setToolTip(
+            "Compare this group's photos side by side (C)")
+        self._compare_btn.clicked.connect(self._open_compare)
+        toolbar.addWidget(self._compare_btn)
+
         self._shortcuts_btn = QPushButton("⌨ Shortcuts")
         self._shortcuts_btn.setToolTip("Show keyboard shortcuts (F1)")
         self._shortcuts_btn.clicked.connect(self._show_shortcuts)
@@ -667,6 +675,7 @@ class ReviewView(QWidget):
         QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.undo_requested.emit)
         QShortcut(QKeySequence("F1"), self, self._show_shortcuts)
         QShortcut(QKeySequence("?"), self, self._show_shortcuts)
+        QShortcut(QKeySequence("C"), self, self._open_compare)
         # Zoom shortcuts
         QShortcut(QKeySequence("+"), self, self._zoom_in)
         QShortcut(QKeySequence("="), self, self._zoom_in)  # Also + without Shift
@@ -697,6 +706,22 @@ class ReviewView(QWidget):
 
     def _show_shortcuts(self):
         ShortcutsHelpDialog(REVIEW_SHORTCUTS, self).exec()
+
+    def _open_compare(self):
+        """Open the current group in a side-by-side compare view."""
+        photos = self._get_current_photos()
+        if not photos:
+            return
+        CompareDialog(photos, self).exec()
+        # Reflect any verdicts set in the dialog back into the grid; the
+        # emit lets the undo checkpoint record them.
+        for p in photos:
+            widget = self._thumb_widgets.get(p.id)
+            if widget:
+                widget.update_verdict(p.verdict)
+        self._update_global_counts()
+        self._update_cluster_list_item()
+        self.review_state_changed.emit()
 
     def _zoom_in(self):
         """Increase thumbnail size."""

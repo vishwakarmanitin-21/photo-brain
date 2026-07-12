@@ -298,9 +298,9 @@
 <h3>Missing table-stakes features (competitive gaps)</h3>
 <div class="tablewrap"><table>
   <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
-  <tr><td class="id">FEAT-01</td><td><span class="badge b-high">High</span></td>
-    <td><b>Side-by-side compare view.</b> The core near-dupe decision is "which of these two is sharper?" — today that's Alt+hover one photo at a time. Every serious competitor (Czkawka, PhotoSweeper's Face-to-Face) has a two-up synced-zoom comparator. The single biggest UX win available.</td>
-    <td><span class="badge b-eff">L</span></td></tr>
+  <tr><td class="id">FEAT-01</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>Side-by-side compare view.</b> Shipped: a <b>⇆ Compare</b> button (and <b>C</b> shortcut) opens the current group's photos large and side by side, each with its quality rating, size, sharpness, face count, a ★ Best badge on the top pick, and Keep/Archive/Delete buttons with a live verdict border. Decisions made here write straight to the photos, reflect in the grid on close, and are Ctrl+Z-undoable (via UX-06). Verified live on a real 3-shot burst: set Archive in the compare view → grid showed ARCHIVE and the count updated → Ctrl+Z restored KEEP. 3 tests incl. the compare→grid→undo round-trip. The single biggest review-experience win.</td>
+    <td class="loc">ui/compare_dialog.py · ui/review_view.py</td><td><span class="badge b-eff">L</span></td></tr>
   <tr><td class="id">FEAT-02</td><td><span class="badge b-high">High</span></td>
     <td><b>HEIC support.</b> iPhones shoot HEIC by default; family-photo folders are full of it. <code>pillow-heif</code> makes this a contained change (hashing, thumbnails, scoring, scanner extension list). The biggest single format gap; WEBP is a cheap add-on at the same time.</td>
     <td><span class="badge b-eff">M</span></td></tr>
