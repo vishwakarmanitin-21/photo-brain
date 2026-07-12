@@ -40,3 +40,26 @@ def verify_decodable(filepath: str) -> bool:
         return False
     finally:
         ImageFile.LOAD_TRUNCATED_IMAGES = previous
+
+
+def read_gray_verified(filepath: str):
+    """Decode to a grayscale numpy array, verifying integrity in one pass.
+
+    Returns the array, or None if the file is missing, unreadable, or
+    truncated. Folding the integrity check into the same decode lets
+    scoring read each photo once instead of a separate OpenCV decode plus
+    a PIL verify — the biggest per-photo cost on large libraries. PIL's
+    'L' conversion uses the same ITU-R 601 luma weights as OpenCV's
+    grayscale, so sharpness/brightness are equivalent.
+    """
+    previous = ImageFile.LOAD_TRUNCATED_IMAGES
+    ImageFile.LOAD_TRUNCATED_IMAGES = False
+    try:
+        with Image.open(filepath) as img:
+            img.load()  # forces full decode; raises on truncation
+            return np.asarray(img.convert("L"))
+    except Exception as error:
+        log.warning("Cannot decode image %s: %s", filepath, error)
+        return None
+    finally:
+        ImageFile.LOAD_TRUNCATED_IMAGES = previous

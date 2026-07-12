@@ -5,7 +5,7 @@ from typing import Optional
 
 import cv2
 
-from app.core.image_io import read_image, verify_decodable
+from app.core.image_io import read_image, verify_decodable, read_gray_verified
 from app.core.models import Photo, Verdict, DupType
 
 log = logging.getLogger("photobrain.scoring")
@@ -102,20 +102,19 @@ def compute_quality_score(
 def score_photo(filepath: str) -> tuple[float, float, float]:
     """Return (sharpness, brightness, quality_score) from a single decode.
 
+    Reads the photo exactly once (grayscale, integrity-checked together):
+    a truncated/corrupt file comes back as None and stays unscoreable
+    (0, 0, 0) so it surfaces for review instead of being silently kept.
+
     Note: quality_score here uses face_count=0. The score is recalculated
     after face detection in the scan pipeline with the actual face count.
     """
     sharpness = 0.0
     brightness = 0.0
     try:
-        gray = read_image(filepath, cv2.IMREAD_GRAYSCALE)
+        gray = read_gray_verified(filepath)
         if gray is None:
-            log.warning("Cannot read image for scoring: %s", filepath)
-        elif not verify_decodable(filepath):
-            # Truncated/corrupt: OpenCV gave us partial pixels, but the file
-            # is damaged. Leave it unscoreable so it surfaces for review
-            # instead of being silently kept.
-            log.warning("Skipping score for damaged image: %s", filepath)
+            log.warning("Skipping score for unreadable image: %s", filepath)
         else:
             sharpness = _sharpness_from_gray(gray)
             brightness = float(gray.mean())
