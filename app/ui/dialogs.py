@@ -273,6 +273,37 @@ class ApplyConfirmDialog(QDialog):
         layout.addWidget(buttons)
 
 
+class ShortcutsHelpDialog(QDialog):
+    """Lists the review keyboard shortcuts so they're discoverable."""
+
+    def __init__(self, shortcuts: list[tuple[str, str]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Keyboard Shortcuts")
+        self.setMinimumWidth(360)
+        layout = QVBoxLayout(self)
+
+        title = QLabel("Keyboard Shortcuts")
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+        layout.addSpacing(6)
+
+        grid = QFormLayout()
+        grid.setHorizontalSpacing(18)
+        for keys, description in shortcuts:
+            key_label = QLabel(keys)
+            key_label.setStyleSheet(
+                "font-family: Consolas, monospace; font-weight: bold; "
+                "background: #eee; padding: 2px 6px; border-radius: 3px;")
+            grid.addRow(key_label, QLabel(description))
+        layout.addLayout(grid)
+
+        layout.addSpacing(10)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+
 class UndoResultDialog(QDialog):
     def __init__(self, restored: int, skipped: int, parent=None):
         super().__init__(parent)

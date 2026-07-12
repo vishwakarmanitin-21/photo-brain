@@ -260,9 +260,9 @@
 <h3>Workflow &amp; discoverability</h3>
 <div class="tablewrap"><table>
   <tr><th>ID</th><th>Sev</th><th>Finding</th><th>Eff.</th></tr>
-  <tr><td class="id">UX-05</td><td><span class="badge b-high">High</span></td>
-    <td><b>The headline feature is invisible.</b> 14 keyboard shortcuts (K/A/D/R, zoom, Alt+hover) exist only in the README — no menu bar, no "?" overlay, no tooltip hints. A non-README user will never find the keyboard-driven workflow the app is named for. Fix: shortcut overlay (?) + hints in button tooltips + a one-line status-bar tip.</td>
-    <td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-05</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>The headline feature is invisible.</b> Shipped: a "⌨ Shortcuts" button in the review toolbar and <b>F1 / ?</b> open a help dialog listing every shortcut; the Keep/Archive/Delete thumbnail buttons now carry their shortcut in their tooltip. The shortcut list is a single <code>REVIEW_SHORTCUTS</code> constant used both to bind the keys and to build the help, so they can't drift. 3 tests.</td>
+    <td class="loc">ui/dialogs.py · ui/review_view.py</td><td><span class="badge b-eff">M</span></td></tr>
   <tr><td class="id">UX-06</td><td><span class="badge b-high">High</span></td>
     <td><b>Ctrl+Z doesn't undo what users expect.</b> It triggers the file-restore undo of the last Apply, not "un-mark the photo I just fat-fingered as DELETE." There is no verdict-level undo at all. Fix: verdict undo stack on Ctrl+Z; move apply-undo to a button/Ctrl+Shift+Z.</td>
     <td><span class="badge b-eff">M</span></td></tr>
@@ -337,6 +337,9 @@
   <tr><td class="id">PERF-05</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Cache hygiene — the thumb/preview cache grew forever across rescans.</b> Shipped: thumbnails and previews are now keyed by <b>sha256</b> (was a per-scan UUID), so rescanning a folder reuses the existing files instead of writing a fresh set and orphaning the old one — and exact-duplicate photos share a single cache entry. Both caches gained <code>prune(keep_keys)</code>, called after every scan, so the cache is bounded to the photos currently in the library (also sweeps leftover <code>.tmp</code> files). Plus a manual <b>Clear Cache</b> button in Settings that shows the current cache size and frees it on click (leaves photos, session and logs untouched). 12 regression tests incl. rescan-does-not-accumulate, dedup, and clear-keeps-DB. Remaining follow-ups (separate, lower value): <code>img.draft()</code> for 4–8× faster thumbnail decode, and sharding the cache dir past ~20k files.</td>
     <td class="loc">core/thumbnails.py · ui/main_window.py</td><td><span class="badge b-eff">S</span></td></tr>
+  <tr><td class="id">PERF-06</td><td><span class="badge b-high">High</span> <span class="badge b-ver">VERIFIED LIVE</span></td>
+    <td><b>Fingerprint+score is now the scan's dominant cost — and it's single-threaded.</b> With faces parallelized (PERF-02), a full optimized scan of the real libraries measured: <b>577 photos = 193s, 993 photos = 495s</b> — and <b>the single-threaded <code>fingerprint_and_score</code> pass is ~73% of that</b> (362s of 495s on the 993 set), while the parallel face phase is only ~100s. Same fix as PERF-02: fan <code>fingerprint_and_score</code> out over a thread pool (pHash's DCT + Laplacian are CPU-bound and release the GIL under numpy/OpenCV). Projected to roughly halve total scan time (~495s → ~250s on 993 photos). The single highest-leverage remaining efficiency item, discovered by testing the optimized pipeline at scale.</td>
+    <td class="loc">core/scanner.py</td><td><span class="badge b-eff">M</span></td></tr>
 </table></div>
 
 <h2 id="adopt">D. Adoption &amp; distribution (the "make it popular" work)</h2>

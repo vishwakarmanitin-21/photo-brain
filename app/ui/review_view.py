@@ -12,6 +12,23 @@ from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServ
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.scoring import is_low_quality_singleton
+from app.ui.dialogs import ShortcutsHelpDialog
+
+# Single source of truth for the review shortcuts — used to bind them AND
+# to populate the discoverable help dialog, so the two never drift.
+REVIEW_SHORTCUTS = [
+    ("K", "Keep the selected photo"),
+    ("A", "Archive the selected photo"),
+    ("D", "Delete the selected photo (to Recycle Bin)"),
+    ("R", "Reset the selected photo to undecided"),
+    ("← / →", "Previous / next photo in the group"),
+    ("↑ / J / ↓", "Previous / next group"),
+    ("Ctrl+Z", "Undo the last Apply"),
+    ("+ / − / 0", "Zoom in / out / reset"),
+    ("Alt + hover", "Full-size preview of a photo"),
+    ("Ctrl+Enter", "Apply all changes"),
+    ("F1 / ?", "Show this shortcuts list"),
+]
 
 log = logging.getLogger("photobrain.review_view")
 
@@ -212,6 +229,7 @@ class ThumbnailWidget(QFrame):
             f"background-color: {COLOR_KEEP}; color: white; border-radius: 3px; }}"
             f"QPushButton:hover {{ background-color: #45a049; }}"
         )
+        self._keep_btn.setToolTip("Keep (shortcut: K)")
         self._keep_btn.clicked.connect(lambda: self._on_verdict_btn(Verdict.KEEP))
         btn_row.addWidget(self._keep_btn)
 
@@ -222,6 +240,7 @@ class ThumbnailWidget(QFrame):
             f"background-color: {COLOR_ARCHIVE}; color: white; border-radius: 3px; }}"
             f"QPushButton:hover {{ background-color: #F57C00; }}"
         )
+        self._archive_btn.setToolTip("Archive (shortcut: A)")
         self._archive_btn.clicked.connect(lambda: self._on_verdict_btn(Verdict.ARCHIVE))
         btn_row.addWidget(self._archive_btn)
 
@@ -232,6 +251,7 @@ class ThumbnailWidget(QFrame):
             f"background-color: {COLOR_DELETE}; color: white; border-radius: 3px; }}"
             f"QPushButton:hover {{ background-color: #d32f2f; }}"
         )
+        self._delete_btn.setToolTip("Delete to Recycle Bin (shortcut: D)")
         self._delete_btn.clicked.connect(lambda: self._on_verdict_btn(Verdict.DELETE))
         btn_row.addWidget(self._delete_btn)
 
@@ -393,6 +413,11 @@ class ReviewView(QWidget):
         self._title_label = QLabel("Review")
         self._title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         toolbar.addWidget(self._title_label, stretch=1)
+
+        self._shortcuts_btn = QPushButton("⌨ Shortcuts")
+        self._shortcuts_btn.setToolTip("Show keyboard shortcuts (F1)")
+        self._shortcuts_btn.clicked.connect(self._show_shortcuts)
+        toolbar.addWidget(self._shortcuts_btn)
 
         self._undo_btn = QPushButton("Undo Last Apply")
         self._undo_btn.setEnabled(False)
@@ -632,6 +657,8 @@ class ReviewView(QWidget):
         QShortcut(QKeySequence(Qt.Key_Left), self, self._select_prev_photo)
         QShortcut(QKeySequence("Ctrl+Return"), self, self.apply_requested.emit)
         QShortcut(QKeySequence("Ctrl+Z"), self, self.undo_requested.emit)
+        QShortcut(QKeySequence("F1"), self, self._show_shortcuts)
+        QShortcut(QKeySequence("?"), self, self._show_shortcuts)
         # Zoom shortcuts
         QShortcut(QKeySequence("+"), self, self._zoom_in)
         QShortcut(QKeySequence("="), self, self._zoom_in)  # Also + without Shift
@@ -659,6 +686,9 @@ class ReviewView(QWidget):
         columns = max(1, available_width // widget_width_with_spacing)
 
         return columns
+
+    def _show_shortcuts(self):
+        ShortcutsHelpDialog(REVIEW_SHORTCUTS, self).exec()
 
     def _zoom_in(self):
         """Increase thumbnail size."""
