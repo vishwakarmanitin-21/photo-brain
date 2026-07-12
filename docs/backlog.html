@@ -125,7 +125,7 @@
 <h1>PhotoBrain — Audit &amp; Backlog</h1>
 <p class="sub">Produced 11 Jul 2026 · full code audit (all ~4,900 lines) + live run of the app through scan → review → apply → undo + market research on competitors and distribution. Updated as implementation lands; green <b>SHIPPED</b> badges are verified completed work.</p>
 
-<p class="lead"><b>The one-paragraph verdict:</b> PhotoBrain's engine is genuinely good — clean architecture, a working end-to-end pipeline, and a feature (face/expression-aware "best shot" picking) that <b>no free Windows tool offers today</b>. The gap between here and a tool strangers love is not missing features; it's (1) a small set of data-safety bugs that could lose a user's decisions or files, (2) a scoring formula whose face/expression intelligence is mathematically drowned out — so the headline differentiator doesn't actually decide picks yet (§F) — and a curation flow that auto-keeps all standalone junk (§G), (3) a distribution story that currently ends at a SmartScreen warning and a "Private — all rights reserved" license on a public repo, and (4) first-ten-minutes polish. Fix safety first, then make the core promise true, then launch-readiness, then delight, then scale.</p>
+<p class="lead"><b>The one-paragraph verdict (updated — 29 of 61 items shipped):</b> The three things that made the original audit nervous are now <b>fixed and validated on real photo libraries</b>: (1) every data-safety hole is closed — the undo journal is crash-safe, applied-state survives undo, decisions autosave, and it's all regression-tested (all 12 SAFE items shipped); (2) the "best shot" differentiator actually works now — the quality score is normalized so face/expression signals decide picks, standalone junk is surfaced not auto-kept, and it holds up on real bursts (SCORE + DISTILL threads complete); (3) the engine is fast and honest at scale — face detection is parallelized ~3×, decoding is shared, the cache self-manages, and the over-merge-at-scale bug is fixed. What remains is not correctness, it's <b>reach and polish</b>: the launch shopfront (screenshots, a signed release, repo description — mostly non-code, needs Nitin), and the review experience (a side-by-side compare view, shortcut discoverability, dark mode). The core product is real and trustworthy; the next gains are in making people find it and enjoy it.</p>
 
 <section class="filter-panel" id="backlog-filters" aria-labelledby="filter-heading" hidden>
   <h2 id="filter-heading">Filter backlog items</h2>
@@ -173,14 +173,15 @@
 <p class="no-results" id="filter-empty" hidden>No backlog items match these filters. Clear a filter and try again.</p>
 
 <h2 id="scorecard">Scorecard</h2>
+<p class="sub" style="margin-top:-2px"><b>Progress: 29 of 61 items shipped</b> (2 in progress, 1 declined, 29 open). Grades below revised to reflect the current build — arrows show the move since the original audit.</p>
 <div class="cards">
-  <div class="card"><span class="grade g-b">B</span><b>Code quality</b>Clean core/ui/worker layering, deterministic, defensive per-photo error handling. Held back by a god-object review view and zero tests.</div>
-  <div class="card"><span class="grade g-c">C−</span><b>Data safety</b>Recycle-Bin-only deletes and undo are the right design, but the undo journal isn't crash-safe and the undo→re-apply flow is broken (verified live).</div>
-  <div class="card"><span class="grade g-b">B−</span><b>UX</b>The keyboard review flow is fast and the apply confirmation is exemplary — but it's undiscoverable, jargon-heavy, and loses work on exit.</div>
-  <div class="card"><span class="grade g-c">C+</span><b>UI / Visual</b>Functional and consistent-ish; ~60 hardcoded inline styles, no dark mode, no DPI awareness, no window-state memory.</div>
-  <div class="card"><span class="grade g-c">C</span><b>Scalability</b>Honest about its ~5k ceiling. O(n²) clustering, single-threaded face phase, and up-to-6× image decoding set the ceiling; all fixable locally.</div>
-  <div class="card"><span class="grade g-d">D</span><b>Adoptability</b>Public repo with 0 stars, no license, no screenshots, no releases, no signing. Everything here is high-leverage and mostly non-code work.</div>
-  <div class="card"><span class="grade g-c">C</span><b>Core promise</b>Finds and trims duplicate groups well — but the "best shot" pick is sharpness-only in practice (§F), standalone junk is auto-kept (§G), and the clustering threshold is unvalidated on real photos.</div>
+  <div class="card"><span class="grade g-b">B+</span><b>Code quality <span style="color:var(--low)">▲ B</span></b>Clean core/ui/worker layering, deterministic, defensive error handling — now with a 101-test suite (was zero). Still held back by the 1,000-line god-object review view (TEST-03 refactor open).</div>
+  <div class="card"><span class="grade g-a">A−</span><b>Data safety <span style="color:var(--low)">▲▲ C−</span></b>All 12 SAFE items shipped: crash-safe write-ahead undo journal, undo→re-apply repaired, autosave, unicode-safe reads, per-thread SQLite, no-overwrite moves, long-path support — each regression-tested and verified live.</div>
+  <div class="card"><span class="grade g-b">B−</span><b>UX <span style="color:var(--muted)">▬ B−</span></b>Autosave closed the work-loss hole; quality ratings, a low-quality lane and Clear-Cache landed. Still: no in-app shortcut help, Ctrl+Z undoes the wrong thing, cluster labels are jargon (13 UX items open).</div>
+  <div class="card"><span class="grade g-b">B−</span><b>UI / Visual <span style="color:var(--low)">▲ C+</span></b>Human 0–100 ratings + "★ Best" badge, a Quality filter lane, and a multi-select backlog filter added. Still no dark mode, no DPI awareness, no window-state memory, ~60 inline styles.</div>
+  <div class="card"><span class="grade g-b">B+</span><b>Scalability <span style="color:var(--low)">▲▲ C</span></b>Face phase parallelized ~3×, pHash+scoring share one decode, cache self-manages, over-merge-at-scale fixed. Measured decode-bound (not O(n²)-bound) to ~5–10k photos. Only remaining ceiling: O(n²) clustering past ~20k (PERF-01).</div>
+  <div class="card"><span class="grade g-c">C+</span><b>Adoptability <span style="color:var(--low)">▲ D</span></b>Legal + technical blockers cleared: MIT license, models bundled (offline-first), UPX off, pinned deps. Still not launched — no screenshots/GIF, no signed release, no repo description/topics (mostly non-code, needs Nitin).</div>
+  <div class="card"><span class="grade g-a">A−</span><b>Core promise <span style="color:var(--low)">▲▲ C</span></b>The differentiator works now: normalized score so face/expression signals decide picks, worst-face aggregation, gap-aware keeps, a standalone-junk lane, and threshold validated + over-merge fixed on real libraries. No free desktop tool matches this.</div>
 </div>
 
 <h2 id="strengths">What's already strong (keep and protect)</h2>
@@ -190,7 +191,8 @@
   <li><b>Smart dedup optimization:</b> pHash, scoring and face detection run once per unique SHA256 and copy to duplicates.</li>
   <li><b>Deterministic everywhere</b> — sorted inputs, filepath tiebreakers — so results are reproducible.</li>
   <li><b>Live scan stats</b> (13 counters + elapsed + current file) are far better feedback than a bare progress bar.</li>
-  <li><b>Verified live:</b> scan → cluster → suggest → apply → undo all worked on a 15-photo synthetic set: exact dupes caught, the blurry frame archived, the sharpest kept, all 15 files restored to their original paths on undo, and a corrupt JPEG didn't crash the scan.</li>
+  <li><b>Verified live, repeatedly:</b> scan → cluster → suggest → apply → undo works on synthetic sets <i>and</i> on real phone libraries (80 / 577 / 993 photos). Exact dupes caught, blurry frames archived, sharpest kept, best-shot badge correct, all files restored on undo, corrupt JPEGs surfaced not crashed, and the packaged .exe builds and starts cleanly.</li>
+  <li><b>Now also true (shipped since the audit):</b> a crash-safe safety net (write-ahead journal, autosave, no-overwrite moves), a calibrated best-shot score that actually uses faces/expressions, a self-managing cache with a Clear-Cache control, chaining-proof clustering, and a face phase parallelized ~3× — all regression-tested (101 tests).</li>
 </ul>
 
 <h2 id="safety">A. Data-safety &amp; correctness findings</h2>
