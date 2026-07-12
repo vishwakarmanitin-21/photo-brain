@@ -59,9 +59,17 @@ def build_clusters(
     1. Group exact duplicates by SHA256.
     2. Mark exact dup groups (size > 1) with dup_type=EXACT.
     3. Pick one representative per SHA256 group for pHash comparison.
-    4. Union-Find on representatives using pHash Hamming distance.
+    4. Anchor-based clustering: each representative joins the first cluster
+       whose anchor is within `threshold`, else it starts a new cluster.
     5. Merge SHA256 groups into their pHash clusters.
     6. Build Cluster objects.
+
+    Anchoring (step 4) replaces transitive union-find on purpose: a photo
+    is compared only to cluster anchors, never to arbitrary members, so a
+    chain A~B~C~…~Z can no longer collapse into one blob when the endpoints
+    are dissimilar. On real libraries plain union-find built clusters of
+    dozens of unrelated photos spanning hours; anchoring caps each cluster
+    to a ball of radius `threshold` around its representative.
     """
     if not photos:
         return [], {}
@@ -76,82 +84,77 @@ def build_clusters(
             for p in group:
                 p.dup_type = DupType.EXACT
 
-    # Step 3: pick representatives (highest quality_score per SHA group)
-    representatives: list[Photo] = []
+    # Step 3: pick representatives (highest quality_score per SHA group),
+    # processed in deterministic quality order so the best photo anchors.
     rep_to_sha: dict[str, str] = {}  # rep photo id -> sha256 key
+    representatives: list[Photo] = []
     for sha_key, group in sha_groups.items():
-        ranked = sorted(group, key=lambda p: (-p.quality_score, p.filepath))
-        rep = ranked[0]
+        rep = sorted(group, key=lambda p: (-p.quality_score, p.filepath))[0]
         representatives.append(rep)
         rep_to_sha[rep.id] = sha_key
+    representatives.sort(key=lambda p: (-p.quality_score, p.filepath))
 
-    # Step 4: Union-Find on representatives using pHash
-    uf = UnionFind()
-    for rep in representatives:
-        uf.add(rep.id)
-
-    # Only compare if both have valid phash
-    reps_with_hash = [r for r in representatives if r.phash]
-    n = len(reps_with_hash)
+    # Step 4: anchor-based clustering (diameter cap)
+    anchors: list[Photo] = []
+    anchor_members: dict[str, list[str]] = {}  # anchor id -> member rep ids
     comparisons = 0
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = hamming_distance(reps_with_hash[i].phash, reps_with_hash[j].phash)
-            if dist <= threshold:
-                uf.union(reps_with_hash[i].id, reps_with_hash[j].id)
-            comparisons += 1
+    for rep in representatives:
+        chosen = None
+        if rep.phash:
+            for anchor in anchors:
+                if not anchor.phash:
+                    continue
+                comparisons += 1
+                if hamming_distance(rep.phash, anchor.phash) <= threshold:
+                    chosen = anchor
+                    break
+        if chosen is None:
+            anchors.append(rep)
+            anchor_members[rep.id] = [rep.id]
+        else:
+            anchor_members[chosen.id].append(rep.id)
 
-    log.info("pHash comparisons: %d", comparisons)
+    log.info("pHash comparisons: %d (anchor-based)", comparisons)
 
-    # Step 5: merge SHA256 groups into pHash clusters
-    components = uf.components()
+    # Step 5: build clusters from anchors (deterministic quality order)
     cluster_photos: dict[str, list[Photo]] = {}
     clusters: list[Cluster] = []
     cluster_idx = 0
 
-    # Sort component keys for deterministic ordering
-    for root_id in sorted(components.keys()):
-        rep_ids = components[root_id]
+    for anchor in anchors:
+        rep_ids = anchor_members[anchor.id]
         cluster_id = uuid.uuid4().hex[:12]
         cluster_idx += 1
         all_photos: list[Photo] = []
-
-        is_exact_only = True
         for rep_id in rep_ids:
-            sha_key = rep_to_sha[rep_id]
-            group = sha_groups[sha_key]
-            all_photos.extend(group)
-            if len(rep_ids) > 1:
-                # Multiple SHA groups merged by pHash → near duplicates
-                is_exact_only = False
-                for p in group:
-                    if p.dup_type == DupType.NONE:
-                        p.dup_type = DupType.NEAR
+            all_photos.extend(sha_groups[rep_to_sha[rep_id]])
 
-        # Assign cluster_id to all member photos
+        # Multiple SHA groups merged by pHash → near duplicates
+        if len(rep_ids) > 1:
+            for p in all_photos:
+                if p.dup_type == DupType.NONE:
+                    p.dup_type = DupType.NEAR
+
         for p in all_photos:
             p.cluster_id = cluster_id
 
-        # Determine if this is purely an exact-dup cluster
-        # (single SHA group with multiple files)
+        # Purely an exact-dup cluster: single SHA group with multiple files
         is_exact = (
             len(rep_ids) == 1
             and len(all_photos) > 1
             and all(p.dup_type == DupType.EXACT for p in all_photos)
         )
 
-        # Sort members by quality desc for consistent ordering
         all_photos.sort(key=lambda p: (-p.quality_score, p.filepath))
         best = all_photos[0]
 
-        cluster = Cluster(
+        clusters.append(Cluster(
             id=cluster_id,
             label=f"Cluster {cluster_idx}",
             representative_photo_id=best.id,
             member_count=len(all_photos),
             is_exact_dup_group=is_exact,
-        )
-        clusters.append(cluster)
+        ))
         cluster_photos[cluster_id] = all_photos
 
     # Sort clusters by member_count desc for display

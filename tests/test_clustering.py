@@ -83,6 +83,31 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(2, len(groups))
         self.assertEqual(2, len(clusters))
 
+    def test_chaining_is_prevented_by_the_diameter_cap(self):
+        # A~B (dist 17) and B~C (dist 17) but A≁C (dist 26). Plain union-find
+        # would merge all three into one blob; anchoring must not — C stays
+        # out of A's cluster because it is compared to the anchor A, not B.
+        a_hash = "0" * 16                      # 0 bits
+        b_hash = f"{0x1FFFF:016x}"             # bits 0..16  -> dist(A,B)=17
+        c_hash = f"{0x3FFFFFF0:016x}"          # bits 4..29  -> dist(A,C)=26,
+                                               #               dist(B,C)=17
+        from app.core.hashing import hamming_distance
+        self.assertEqual(17, hamming_distance(a_hash, b_hash))
+        self.assertEqual(17, hamming_distance(b_hash, c_hash))
+        self.assertEqual(26, hamming_distance(a_hash, c_hash))
+
+        photos = [
+            make_photo("a", sha256="sa", phash=a_hash, quality=3.0),
+            make_photo("b", sha256="sb", phash=b_hash, quality=2.0),
+            make_photo("c", sha256="sc", phash=c_hash, quality=1.0),
+        ]
+        clusters, members = build_clusters(photos, threshold=17)
+
+        by_photo = {p.id: c.id for c in clusters for p in members[c.id]}
+        self.assertEqual(2, len(clusters))
+        self.assertEqual(by_photo["a"], by_photo["b"])      # A and B together
+        self.assertNotEqual(by_photo["a"], by_photo["c"])   # C is separate
+
     def test_member_order_uses_filepath_as_quality_tiebreaker(self):
         photos = [
             make_photo(
