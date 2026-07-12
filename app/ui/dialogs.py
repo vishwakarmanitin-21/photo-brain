@@ -2,9 +2,18 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QPushButton,
     QDoubleSpinBox, QCheckBox, QDialogButtonBox, QFormLayout, QGroupBox,
-    QMessageBox,
+    QMessageBox, QComboBox, QWidget,
 )
 from PySide6.QtCore import Qt
+
+
+# UX-14: plain-language grouping presets mapped to the raw pHash threshold.
+# The number stays available under "Advanced" for power users.
+GROUPING_PRESETS = [
+    ("Only near-identical", 8),
+    ("Similar shots (recommended)", 17),
+    ("Loose grouping", 24),
+]
 
 
 def _format_bytes(n: float) -> str:
@@ -33,27 +42,52 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Clustering group
-        group = QGroupBox("Clustering")
-        form = QFormLayout()
+        group = QGroupBox("Grouping")
+        group_layout = QVBoxLayout()
 
-        self._threshold_spin = QSpinBox()
-        self._threshold_spin.setRange(1, 30)
-        self._threshold_spin.setValue(threshold)
-        self._threshold_spin.setToolTip("Lower = stricter matching (fewer false positives)")
-        form.addRow("pHash Threshold:", self._threshold_spin)
-
-        hint = QLabel("Default: 17 (related shots from same location/session).\n"
-                       "Lower = stricter. Higher = broader grouping. Range: 1-30")
-        hint.setStyleSheet("font-size: 10px; color: #888;")
-        form.addRow("", hint)
+        # Plain-language preset picker (UX-14).
+        preset_form = QFormLayout()
+        self._preset_combo = QComboBox()
+        for label_text, _value in GROUPING_PRESETS:
+            self._preset_combo.addItem(label_text)
+        self._preset_combo.addItem("Custom")  # last item = advanced value
+        self._preset_combo.setToolTip(
+            "How aggressively PhotoBrain groups similar photos together")
+        preset_form.addRow("How to group photos:", self._preset_combo)
 
         self._keep_spin = QSpinBox()
         self._keep_spin.setRange(1, 10)
         self._keep_spin.setValue(keep_count)
         self._keep_spin.setToolTip("Number of best photos to suggest keeping per cluster")
-        form.addRow("Keep per cluster:", self._keep_spin)
+        preset_form.addRow("Keep per group:", self._keep_spin)
+        group_layout.addLayout(preset_form)
 
-        group.setLayout(form)
+        # Advanced: the raw pHash threshold, hidden by default.
+        self._advanced_check = QCheckBox("Advanced: set the exact match threshold")
+        self._advanced_check.setStyleSheet("font-size: 11px; color: #555;")
+        group_layout.addWidget(self._advanced_check)
+
+        self._advanced_box = QWidget()
+        adv_form = QFormLayout(self._advanced_box)
+        adv_form.setContentsMargins(0, 0, 0, 0)
+        self._threshold_spin = QSpinBox()
+        self._threshold_spin.setRange(1, 30)
+        self._threshold_spin.setValue(threshold)
+        self._threshold_spin.setToolTip("Lower = stricter matching (fewer false positives)")
+        adv_form.addRow("pHash threshold:", self._threshold_spin)
+        adv_hint = QLabel("Lower = stricter (only near-identical). "
+                          "Higher = broader grouping. Range: 1-30")
+        adv_hint.setStyleSheet("font-size: 10px; color: #888;")
+        adv_form.addRow("", adv_hint)
+        self._advanced_box.setVisible(False)
+        group_layout.addWidget(self._advanced_box)
+
+        self._advanced_check.toggled.connect(self._advanced_box.setVisible)
+        self._preset_combo.activated.connect(self._on_preset_chosen)
+        self._threshold_spin.valueChanged.connect(self._sync_preset_to_threshold)
+        self._sync_preset_to_threshold(threshold)
+
+        group.setLayout(group_layout)
         layout.addWidget(group)
 
         # Events group
@@ -142,6 +176,21 @@ class SettingsDialog(QDialog):
             "Thumbnails rebuild automatically the next time you view photos. "
             "Your photos and review progress were not affected.",
         )
+
+    def _on_preset_chosen(self, index: int):
+        """User picked a named preset — push its value into the threshold."""
+        if 0 <= index < len(GROUPING_PRESETS):
+            self._threshold_spin.setValue(GROUPING_PRESETS[index][1])
+        # "Custom" (last item) leaves the threshold as-is.
+
+    def _sync_preset_to_threshold(self, value: int):
+        """Reflect the current threshold in the preset combo — a preset name
+        if it matches one exactly, otherwise 'Custom'."""
+        for i, (_label, preset_value) in enumerate(GROUPING_PRESETS):
+            if value == preset_value:
+                self._preset_combo.setCurrentIndex(i)
+                return
+        self._preset_combo.setCurrentIndex(self._preset_combo.count() - 1)  # Custom
 
     def threshold(self) -> int:
         return self._threshold_spin.value()
