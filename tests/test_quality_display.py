@@ -54,6 +54,7 @@ class ThumbnailDisplayTests(unittest.TestCase):
             "c2": [self._photo("only", 0.45)],
         }
         rv.load_data([best, solo], cp, has_undo=False, events=[])
+        rv._hide_singletons.setChecked(False)  # keep the solo cluster visible
 
         # Cluster with a real choice: exactly one "★ Best".
         rv._cluster_list.setCurrentRow(0)

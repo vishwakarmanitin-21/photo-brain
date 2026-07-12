@@ -49,6 +49,7 @@ class ThumbDowngradeGuardTests(unittest.TestCase):
                       file_size=1, quality_score=0.5, verdict=Verdict.KEEP)
         rv.load_data([Cluster(id="c", label="c", member_count=1)],
                      {"c": [photo]}, has_undo=False, events=[])
+        rv._hide_singletons.setChecked(False)  # keep the single-photo cluster visible
         rv._cluster_list.setCurrentRow(0)
         return rv
 

@@ -5,7 +5,7 @@ import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget,
     QListWidgetItem, QScrollArea, QGridLayout, QLabel, QFrame,
-    QPushButton, QSizePolicy, QComboBox, QApplication, QSlider,
+    QPushButton, QSizePolicy, QComboBox, QApplication, QSlider, QCheckBox,
 )
 from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer
 from PySide6.QtGui import (
@@ -68,6 +68,23 @@ QUALITY_FILTER_LOW = "Low Quality (no dupes)"
 
 
 HOVER_PREVIEW_MAX = 1000  # hover overlay never needs more than this
+
+
+def cluster_display_label(cluster) -> str:
+    """Plain-language label for the cluster list — no developer vocabulary
+    like 'Cluster 8 [EXACT] [APPLIED]'. (UX-08)"""
+    if cluster.is_exact_dup_group:
+        name = "Exact duplicates"
+    elif cluster.member_count > 1:
+        name = "Similar shots"
+    else:
+        name = "Single photo"
+    text = f"{name} ({cluster.member_count})"
+    if cluster.applied:
+        text += "  ✓ applied"
+    elif cluster.reviewed:
+        text += "  ✓ reviewed"
+    return text
 
 
 def load_bounded_pixmap(filepath: str, max_dim: int) -> QPixmap:
@@ -539,6 +556,18 @@ class ReviewView(QWidget):
 
         filter_bar.addSpacing(15)
 
+        # Hide single auto-keep photos — they need no decision and clutter
+        # the list of real duplicate groups. (UX-08)
+        self._hide_singletons = QCheckBox("Hide single photos")
+        self._hide_singletons.setChecked(True)
+        self._hide_singletons.setToolTip(
+            "Hide one-photo groups that are already set to Keep — there's "
+            "nothing to decide on them. Untick to see every photo.")
+        self._hide_singletons.toggled.connect(self._apply_filters)
+        filter_bar.addWidget(self._hide_singletons)
+
+        filter_bar.addSpacing(15)
+
         filter_bar.addWidget(QLabel("Event:"))
         self._event_filter = QComboBox()
         self._event_filter.addItem(EVENT_FILTER_ALL)
@@ -981,6 +1010,14 @@ class ReviewView(QWidget):
                 ids.add(members[0].id)
         return ids
 
+    def _is_hideable_singleton(self, cluster) -> bool:
+        """A one-photo group whose only photo is set to Keep — there's
+        nothing to decide, so it's safe to hide from the review list."""
+        if cluster.member_count != 1:
+            return False
+        members = self._cluster_photos.get(cluster.id, [])
+        return len(members) == 1 and members[0].verdict == Verdict.KEEP
+
     def _apply_filters(self):
         face_filter = self._face_filter.currentText()
         quality_filter = self._quality_filter.currentText()
@@ -1033,32 +1070,36 @@ class ReviewView(QWidget):
         else:
             self._clusters = list(self._all_clusters)
 
+        # Hide single auto-keep photos (nothing to decide) unless asked to show
+        # them. (UX-08)
+        hidden_singletons = 0
+        if self._hide_singletons.isChecked():
+            kept = [c for c in self._clusters if not self._is_hideable_singleton(c)]
+            hidden_singletons = len(self._clusters) - len(kept)
+            self._clusters = kept
+
         # Update filter status
         total_photos = sum(len(self._cluster_photos.get(c.id, [])) for c in self._all_clusters)
+        hidden_note = (
+            f" · {hidden_singletons} single photo(s) hidden"
+            if hidden_singletons else ""
+        )
         if passing_photo_ids is not None:
             matching_photos = len(passing_photo_ids)
             self._filter_status.setText(
-                f"Showing {len(self._clusters)} of {len(self._all_clusters)} clusters "
-                f"({matching_photos} of {total_photos} photos)"
+                f"Showing {len(self._clusters)} of {len(self._all_clusters)} groups "
+                f"({matching_photos} of {total_photos} photos){hidden_note}"
             )
         else:
             self._filter_status.setText(
-                f"{len(self._clusters)} clusters, {total_photos} photos"
+                f"{len(self._clusters)} groups, {total_photos} photos{hidden_note}"
             )
 
         # Rebuild cluster list
         self._cluster_list.blockSignals(True)
         self._cluster_list.clear()
         for c in self._clusters:
-            flags = ""
-            if c.is_exact_dup_group:
-                flags = " [EXACT]"
-            if c.reviewed:
-                flags += " [OK]"
-            if c.applied:
-                flags += " [APPLIED]"
-            text = f"{c.label} ({c.member_count}){flags}"
-            self._cluster_list.addItem(QListWidgetItem(text))
+            self._cluster_list.addItem(QListWidgetItem(cluster_display_label(c)))
         self._cluster_list.blockSignals(False)
 
         self._update_global_counts()
@@ -1339,18 +1380,9 @@ class ReviewView(QWidget):
             cluster.keep_count = keep
             cluster.delete_count = delete
 
-            flags = ""
-            if cluster.is_exact_dup_group:
-                flags = " [EXACT]"
-            if cluster.reviewed:
-                flags += " [OK]"
-            if cluster.applied:
-                flags += " [APPLIED]"
-            text = f"{cluster.label} ({cluster.member_count}){flags}"
-
             item = self._cluster_list.item(self._current_cluster_idx)
             if item:
-                item.setText(text)
+                item.setText(cluster_display_label(cluster))
 
     def get_all_photos(self) -> list[Photo]:
         """Return all photos across all clusters for persistence."""
