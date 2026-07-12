@@ -8,6 +8,8 @@ from PIL import Image
 from PIL.ExifTags import Base as ExifBase
 
 from app.core.models import Photo, Event
+# Register HEIF/HEIC with Pillow before any decode (FEAT-02).
+from app.core import image_formats  # noqa: F401
 
 log = logging.getLogger("photobrain.events")
 

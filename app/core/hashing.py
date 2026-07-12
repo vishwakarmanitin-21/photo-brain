@@ -7,6 +7,9 @@ import numpy as np
 from PIL import Image, ImageFile
 import imagehash
 
+# Register HEIF/HEIC with Pillow before any decode (FEAT-02).
+from app.core import image_formats  # noqa: F401
+
 log = logging.getLogger("photobrain.hashing")
 
 CHUNK_SIZE = 65536  # 64 KB

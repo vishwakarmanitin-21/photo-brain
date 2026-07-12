@@ -8,6 +8,8 @@ PySide6==6.11.1
 # `cv2` package and silently shadow each other.
 opencv-contrib-python==5.0.0.93
 Pillow==12.3.0
+# HEIC/HEIF decoding (iPhone photos) via a bundled libheif — FEAT-02.
+pillow-heif==1.4.0
 ImageHash==4.3.2
 mediapipe==0.10.35
 Send2Trash==2.1.0

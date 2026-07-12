@@ -20,7 +20,10 @@ SKIP_DIRS = frozenset({
     ARCHIVE_LOW_QUALITY_FOLDER,
 })
 
-SUPPORTED_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png"})
+# .heic/.heif decode via pillow-heif; .webp is native to Pillow (FEAT-02).
+SUPPORTED_EXTENSIONS = frozenset({
+    ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif",
+})
 
 
 def get_photobrain_dir(source_folder: str) -> str:

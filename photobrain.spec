@@ -10,10 +10,13 @@ block_cipher = None
 mediapipe_datas = collect_data_files('mediapipe')
 mediapipe_libs = collect_dynamic_libs('mediapipe')
 
+# pillow-heif ships a native extension + bundled libheif DLLs (FEAT-02).
+heif_libs = collect_dynamic_libs('pillow_heif')
+
 a = Analysis(
     ['run.py'],
     pathex=[],
-    binaries=mediapipe_libs,
+    binaries=mediapipe_libs + heif_libs,
     datas=[
         ('assets', 'assets'),
         *mediapipe_datas,
@@ -30,6 +33,8 @@ a = Analysis(
         'cv2',
         'numpy',
         'PIL',
+        'pillow_heif',
+        '_pillow_heif',
         'imagehash',
         'send2trash',
         'scipy',

@@ -15,6 +15,8 @@ from typing import Callable, Optional
 from PIL import Image
 
 from app.core.models import Photo
+# Register HEIF/HEIC with Pillow before any decode (FEAT-02).
+from app.core import image_formats  # noqa: F401
 
 log = logging.getLogger("photobrain.thumbnails")
 

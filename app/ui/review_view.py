@@ -107,7 +107,22 @@ def load_bounded_pixmap(filepath: str, max_dim: int) -> QPixmap:
         scaled = size.scaled(max_dim, max_dim, Qt.KeepAspectRatio)
         reader.setScaledSize(scaled)
     image = reader.read()
-    return QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+    if not image.isNull():
+        return QPixmap.fromImage(image)
+    # Qt can't decode HEIC without a plugin — fall back to Pillow (FEAT-02).
+    return _load_bounded_via_pil(filepath, max_dim)
+
+
+def _load_bounded_via_pil(filepath: str, max_dim: int) -> QPixmap:
+    try:
+        from PIL import Image, ImageQt
+        from app.core import image_formats  # noqa: F401  (registers HEIC)
+        with Image.open(filepath) as img:
+            img = img.convert("RGB")
+            img.thumbnail((max_dim, max_dim))
+            return QPixmap.fromImage(ImageQt.ImageQt(img))
+    except Exception:
+        return QPixmap()
 
 
 def _format_size(n: float) -> str:

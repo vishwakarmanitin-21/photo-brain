@@ -86,7 +86,7 @@ what keeps your photos on your PC.)
 
 ### 1. Select a Folder
 
-Choose a folder containing your photos (JPEG, PNG). PhotoBrain scans recursively and supports nested subdirectories.
+Choose a folder containing your photos (JPEG, PNG, WEBP, HEIC/HEIF). PhotoBrain scans recursively and supports nested subdirectories.
 
 ### 2. Scan
 
@@ -255,12 +255,14 @@ your-photos/
 
 - JPEG (`.jpg`, `.jpeg`)
 - PNG (`.png`)
+- WEBP (`.webp`)
+- HEIC / HEIF (`.heic`, `.heif`) — the default iPhone format, via `pillow-heif`
 
 ## Known Limitations
 
 - **pHash clustering is O(n^2)** — works well for ~5,000 photos but may be slow for very large collections (50,000+)
 - **Single undo level** — only the most recent apply operation can be undone
-- **No HEIC or RAW support** — only JPEG and PNG in the current version
+- **No RAW support** — JPEG, PNG, WEBP, and HEIC/HEIF are supported; camera RAW is not
 - **Flat output structure** — files moved to output folders do not preserve their original subdirectory hierarchy
 - **Expression analysis on close-up faces only** — distant faces are detected but too small for reliable blendshape extraction
 - **Windows only** — built and tested for Windows 10/11
