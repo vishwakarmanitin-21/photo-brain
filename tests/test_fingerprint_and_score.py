@@ -80,6 +80,31 @@ class FingerprintAndScoreTests(unittest.TestCase):
         self.assertIsNone(ph)
         self.assertIsNone(gray)
 
+    def test_result_independent_of_worker_count(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = [os.path.join(folder, f"p{i}.jpg") for i in range(6)]
+            for i, p in enumerate(paths):
+                _scene(p, seed=i * 20)
+            a = compute_hashes(paths)
+            b = compute_hashes(paths)
+            fingerprint_and_score(a, workers=1)
+            fingerprint_and_score(b, workers=4)
+            by_a = {p.filepath: p for p in a}
+            for p in b:
+                self.assertEqual(by_a[p.filepath].phash, p.phash)
+                self.assertAlmostEqual(
+                    by_a[p.filepath].quality_score, p.quality_score, places=9)
+
+    def test_cancellation_stops_early(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = [os.path.join(folder, f"p{i}.jpg") for i in range(4)]
+            for i, p in enumerate(paths):
+                _scene(p, seed=i)
+            photos = compute_hashes(paths)
+            fingerprint_and_score(photos, cancel_check=lambda: True, workers=2)
+            # Cancelled before applying any results.
+            self.assertTrue(all(p.phash is None for p in photos))
+
 
 if __name__ == "__main__":
     unittest.main()
