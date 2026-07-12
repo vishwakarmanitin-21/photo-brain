@@ -1010,6 +1010,48 @@ class ReviewView(QWidget):
                 ids.add(members[0].id)
         return ids
 
+    def get_view_state(self) -> dict:
+        """Snapshot the filters and selected group so a reload (e.g. after
+        Apply) can put the user back where they were (UX-10)."""
+        current_id = None
+        if 0 <= self._current_cluster_idx < len(self._clusters):
+            current_id = self._clusters[self._current_cluster_idx].id
+        return {
+            "face": self._face_filter.currentText(),
+            "quality": self._quality_filter.currentText(),
+            "event_idx": self._event_filter.currentIndex(),
+            "hide_singletons": self._hide_singletons.isChecked(),
+            "cluster_id": current_id,
+        }
+
+    def apply_view_state(self, state: dict):
+        """Restore a snapshot from get_view_state()."""
+        if not state:
+            return
+        for widget, setter, value in (
+            (self._face_filter, self._face_filter.setCurrentText, state.get("face")),
+            (self._quality_filter, self._quality_filter.setCurrentText, state.get("quality")),
+            (self._hide_singletons, self._hide_singletons.setChecked, state.get("hide_singletons")),
+        ):
+            widget.blockSignals(True)
+            if value is not None:
+                setter(value)
+            widget.blockSignals(False)
+        self._event_filter.blockSignals(True)
+        idx = state.get("event_idx", 0)
+        if idx is not None and 0 <= idx < self._event_filter.count():
+            self._event_filter.setCurrentIndex(idx)
+        self._event_filter.blockSignals(False)
+
+        self._apply_filters()
+
+        cid = state.get("cluster_id")
+        if cid is not None:
+            for row, c in enumerate(self._clusters):
+                if c.id == cid:
+                    self._cluster_list.setCurrentRow(row)
+                    break
+
     def _is_hideable_singleton(self, cluster) -> bool:
         """A one-photo group whose only photo is set to Keep — there's
         nothing to decide, so it's safe to hide from the review list."""
@@ -1109,7 +1151,23 @@ class ReviewView(QWidget):
         else:
             # Clear grid
             self._clear_grid()
-            self._cluster_pos_label.setText("No clusters match filters")
+            self._cluster_pos_label.setText(self._empty_state_message())
+
+    def _empty_state_message(self) -> str:
+        """Explain *why* the grid is empty in plain language (UX-10)."""
+        if not self._all_clusters:
+            return ("Your library is already clean — no duplicates or "
+                    "groups to review.")
+        filters_active = (
+            self._face_filter.currentText() != FACE_FILTER_ALL
+            or self._quality_filter.currentText() != QUALITY_FILTER_ALL
+            or self._event_filter.currentIndex() > 0
+        )
+        if filters_active:
+            return "No groups match the current filters — adjust the filters above."
+        # No filters active: everything left was a hidden single auto-keep.
+        return ("Your library is already clean — every photo is a keeper "
+                "with no duplicates. Untick “Hide single photos” to see them.")
 
     def _clear_grid(self):
         self._thumb_widgets.clear()

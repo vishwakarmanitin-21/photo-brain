@@ -33,6 +33,25 @@ VIEW_SCAN = 1
 VIEW_REVIEW = 2
 
 
+def _friendly_error(exc: Exception) -> str:
+    """Translate low-level OS errors into plain guidance instead of dumping
+    raw 'WinError 32' text at the user (UX-10). The technical detail still
+    goes to the log via the caller's log.exception()."""
+    if isinstance(exc, PermissionError):
+        return ("PhotoBrain couldn't access one of your files — it may be open "
+                "in another program (a photo viewer, backup tool, or Explorer "
+                "preview). Close anything using the folder and try again.")
+    if isinstance(exc, FileNotFoundError):
+        return ("A file or folder couldn't be found — it may have been moved or "
+                "renamed outside PhotoBrain since the scan. Re-scan the folder "
+                "and try again.")
+    if isinstance(exc, OSError) and getattr(exc, "winerror", None):
+        return ("Windows reported a problem while moving your photos. Nothing "
+                "was deleted. The technical details were saved to the log.")
+    text = str(exc).strip()
+    return text or "An unexpected error occurred. See the log for details."
+
+
 def _verdict_bytes(photos) -> tuple[int, int, int]:
     """Total file sizes (keep, archive, delete) for the apply summary."""
     keep = archive = delete = 0
@@ -224,7 +243,7 @@ class MainWindow(QMainWindow):
             self._load_review()
         except Exception as e:
             log.exception("Failed to load review")
-            QMessageBox.critical(self, "Error Loading Review", f"Failed to load review: {str(e)}")
+            QMessageBox.critical(self, "Error Loading Review", _friendly_error(e))
 
     @Slot(str)
     def _on_scan_error(self, msg: str):
@@ -267,9 +286,12 @@ class MainWindow(QMainWindow):
 
     # ── Review ───────────────────────────────────────────
 
-    def _load_review(self):
+    def _load_review(self, preserve_place: bool = False):
         if not self.store:
             return
+        prev_state = (
+            self.review_view.get_view_state() if preserve_place else None
+        )
         self.store.update_session_status(self.session_id, SessionStatus.REVIEWING)
 
         clusters = self.store.get_clusters_by_session(self.session_id)
@@ -285,6 +307,8 @@ class MainWindow(QMainWindow):
         has_undo = len(apply_log) > 0
 
         self.review_view.load_data(clusters, cluster_photos, has_undo, events=events)
+        if prev_state:
+            self.review_view.apply_view_state(prev_state)
 
         # Start thumbnail generation in background
         all_photos = []
@@ -421,12 +445,12 @@ class MainWindow(QMainWindow):
                 msg += f"\n\nSkipped {len(applied_cluster_ids)} already-applied clusters."
             QMessageBox.information(self, "Apply Complete", msg)
 
-            # Reload review with undo available
-            self._load_review()
+            # Reload review with undo available, keeping the user's place.
+            self._load_review(preserve_place=True)
 
         except Exception as e:
             log.exception("Apply failed")
-            QMessageBox.critical(self, "Apply Failed", str(e))
+            QMessageBox.critical(self, "Apply Failed", _friendly_error(e))
 
     @Slot(str)
     def _on_apply_cluster(self, cluster_id: str):
@@ -490,7 +514,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             log.exception("Cluster apply failed")
-            QMessageBox.critical(self, "Apply Failed", str(e))
+            QMessageBox.critical(self, "Apply Failed", _friendly_error(e))
 
     # ── Undo ─────────────────────────────────────────────
 
@@ -525,11 +549,11 @@ class MainWindow(QMainWindow):
             dialog = UndoResultDialog(restored, skipped, self)
             dialog.exec()
 
-            self._load_review()
+            self._load_review(preserve_place=True)
 
         except Exception as e:
             log.exception("Undo failed")
-            QMessageBox.critical(self, "Undo Failed", str(e))
+            QMessageBox.critical(self, "Undo Failed", _friendly_error(e))
 
     # ── Settings ─────────────────────────────────────────
 

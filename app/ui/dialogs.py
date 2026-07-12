@@ -316,7 +316,18 @@ class ApplyConfirmDialog(QDialog):
         layout.addSpacing(10)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("Apply")
+        ok_btn = buttons.button(QDialogButtonBox.Ok)
+        ok_btn.setText("Apply")
+        cancel_btn = buttons.button(QDialogButtonBox.Cancel)
+        # UX-10: when deletes are involved, don't let a stray Enter confirm the
+        # dialog straight into the Recycle Bin — make Cancel the default so the
+        # user must deliberately click Apply.
+        if delete > 0:
+            ok_btn.setAutoDefault(False)
+            ok_btn.setDefault(False)
+            cancel_btn.setAutoDefault(True)
+            cancel_btn.setDefault(True)
+            cancel_btn.setFocus()
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
