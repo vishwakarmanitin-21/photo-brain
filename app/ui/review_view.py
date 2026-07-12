@@ -26,6 +26,7 @@ REVIEW_SHORTCUTS = [
     ("D", "Delete the selected photo (to Recycle Bin)"),
     ("R", "Reset the selected photo to undecided"),
     ("C", "Compare this group's photos side by side"),
+    ("Ctrl / Shift + click", "Select several photos; K/A/D then applies to all"),
     ("← / →", "Previous / next photo in the group"),
     ("↑ / ↓", "Move up / down a row in the photo grid"),
     ("J / PageDown / PageUp", "Next / previous group"),
@@ -471,7 +472,8 @@ class ReviewView(QWidget):
         self._event_photos: dict[str, set[str]] = {}  # event_id -> set of photo_ids
         self._thumb_widgets: dict[str, ThumbnailWidget] = {}
         self._current_cluster_idx = -1
-        self._selected_photo_id: str | None = None
+        self._selected_photo_id: str | None = None   # anchor / primary
+        self._selected_ids: set[str] = set()          # full multi-selection
         self._current_photos: list[Photo] = []  # Current cluster photos
         # Verdict-level undo: shadow of the last-checkpointed (verdict,
         # user_override) per photo, and a stack of prior states to restore.
@@ -1263,14 +1265,44 @@ class ReviewView(QWidget):
 
     @Slot(str)
     def _on_photo_clicked(self, photo_id: str):
-        self._select_photo(photo_id)
+        # Ctrl+click toggles one; Shift+click extends a range; plain click
+        # selects just one (FEAT-03).
+        mods = QApplication.keyboardModifiers()
+        if mods & Qt.ControlModifier:
+            self._toggle_selection(photo_id)
+        elif mods & Qt.ShiftModifier and self._selected_photo_id:
+            self._range_selection(photo_id)
+        else:
+            self._select_photo(photo_id)
 
     def _select_photo(self, photo_id: str):
-        if self._selected_photo_id and self._selected_photo_id in self._thumb_widgets:
-            self._thumb_widgets[self._selected_photo_id].set_selected(False)
+        """Single-select: replaces the whole selection with one photo."""
         self._selected_photo_id = photo_id
-        if photo_id in self._thumb_widgets:
-            self._thumb_widgets[photo_id].set_selected(True)
+        self._selected_ids = {photo_id} if photo_id in self._thumb_widgets else set()
+        self._apply_selection_visuals()
+
+    def _toggle_selection(self, photo_id: str):
+        if photo_id in self._selected_ids:
+            self._selected_ids.discard(photo_id)
+            if self._selected_photo_id == photo_id:
+                self._selected_photo_id = next(iter(self._selected_ids), None)
+        else:
+            self._selected_ids.add(photo_id)
+            self._selected_photo_id = photo_id
+        self._apply_selection_visuals()
+
+    def _range_selection(self, photo_id: str):
+        ids = [p.id for p in self._get_current_photos()]
+        if self._selected_photo_id not in ids or photo_id not in ids:
+            self._select_photo(photo_id)
+            return
+        lo, hi = sorted((ids.index(self._selected_photo_id), ids.index(photo_id)))
+        self._selected_ids.update(ids[lo:hi + 1])
+        self._apply_selection_visuals()
+
+    def _apply_selection_visuals(self):
+        for pid, widget in self._thumb_widgets.items():
+            widget.set_selected(pid in self._selected_ids)
 
     def _get_current_photos(self) -> list[Photo]:
         if 0 <= self._current_cluster_idx < len(self._clusters):
@@ -1351,12 +1383,17 @@ class ReviewView(QWidget):
         self.review_state_changed.emit()
 
     def _set_selected_verdict(self, verdict: Verdict):
-        if not self._selected_photo_id:
-            return
-        widget = self._thumb_widgets.get(self._selected_photo_id)
-        if widget:
-            widget.photo.user_override = True
-            widget.update_verdict(verdict)
+        # Apply to every selected photo (FEAT-03), or the anchor as a fallback.
+        target_ids = self._selected_ids or (
+            {self._selected_photo_id} if self._selected_photo_id else set())
+        applied = False
+        for pid in target_ids:
+            widget = self._thumb_widgets.get(pid)
+            if widget:
+                widget.photo.user_override = True
+                widget.update_verdict(verdict)
+                applied = True
+        if applied:
             self._update_global_counts()
             self._update_cluster_list_item()
             self.review_state_changed.emit()

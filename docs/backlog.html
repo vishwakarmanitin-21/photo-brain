@@ -304,8 +304,8 @@
   <tr><td class="id">FEAT-02</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>HEIC support.</b> iPhones shoot HEIC by default; family-photo folders are full of it. <code>pillow-heif</code> makes this a contained change (hashing, thumbnails, scoring, scanner extension list). The biggest single format gap; WEBP is a cheap add-on at the same time. <b>Shipped:</b> pillow-heif registers the HEIF opener at import so hashing, thumbnails, scoring, EXIF and integrity checks all decode HEIC; read_image() falls back to Pillow so OpenCV-only paths (faces, sharpness) work too; the hover preview falls back to Pillow when Qt can't decode HEIC; .heic/.heif/.webp added to the scan list; pinned in requirements and bundled in the PyInstaller spec (collect_dynamic_libs).</td>
     <td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">FEAT-03</td><td><span class="badge b-med">Med</span></td>
-    <td><b>Multi-select within a cluster</b> (Ctrl/Shift+click) so "keep these 3 of 12" isn't 9 separate actions.</td>
+  <tr><td class="id">FEAT-03</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td><b>Multi-select within a cluster</b> (Ctrl/Shift+click) so "keep these 3 of 12" isn't 9 separate actions. <b>Shipped:</b> Ctrl+click toggles a photo, Shift+click extends an inclusive range, plain click resets to one; K/A/D/R then apply to the whole selection and undo restores it as a single step. Shortcut list documents it.</td>
     <td><span class="badge b-eff">M</span></td></tr>
   <tr><td class="id">FEAT-04</td><td><span class="badge b-med">Med</span> <span class="badge b-ship">SHIPPED</span></td>
     <td><b>Space-savings framing.</b> Shipped: the apply dialog now shows the size of each bucket and a savings line — <i>honest</i> about PhotoBrain's model (archived files are moved, still on disk; only Recycle-Bin deletes free space): "Frees ~X once you empty the Recycle Bin. Another Y is set aside in archive folders." Per-photo size added to the review tooltip. 5 tests.</td>

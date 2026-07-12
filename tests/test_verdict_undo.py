@@ -31,7 +31,7 @@ class VerdictUndoTests(unittest.TestCase):
 
     def test_single_change_then_undo(self):
         rv, by_id = self._loaded()
-        rv._selected_photo_id = "b"
+        rv._select_photo("b")
         rv._mark_archive()
         self.assertEqual(Verdict.ARCHIVE, by_id["b"].verdict)
         rv._undo_verdict()
@@ -39,8 +39,8 @@ class VerdictUndoTests(unittest.TestCase):
 
     def test_undo_is_lifo_across_several_changes(self):
         rv, by_id = self._loaded()
-        rv._selected_photo_id = "a"; rv._mark_delete()
-        rv._selected_photo_id = "b"; rv._mark_archive()
+        rv._select_photo("a"); rv._mark_delete()
+        rv._select_photo("b"); rv._mark_archive()
         self.assertEqual(Verdict.DELETE, by_id["a"].verdict)
         self.assertEqual(Verdict.ARCHIVE, by_id["b"].verdict)
 
@@ -65,7 +65,7 @@ class VerdictUndoTests(unittest.TestCase):
 
     def test_undo_does_not_re_record_itself(self):
         rv, by_id = self._loaded()
-        rv._selected_photo_id = "a"; rv._mark_delete()
+        rv._select_photo("a"); rv._mark_delete()
         rv._undo_verdict()
         # Stack is now empty; a second undo must not resurrect the change.
         rv._undo_verdict()
