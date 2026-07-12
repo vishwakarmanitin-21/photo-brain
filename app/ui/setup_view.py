@@ -5,9 +5,39 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QSpacerItem, QSizePolicy,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QThread
 
 from app.util.paths import has_existing_session, SUPPORTED_EXTENSIONS, SKIP_DIRS
+
+
+class _FolderCountWorker(QThread):
+    """Walks a folder tree off the UI thread so picking a huge or network
+    folder never freezes the Browse click. Emits the running total as it
+    goes, and reports partial results if cancelled."""
+
+    progress = Signal(int)   # count so far
+    counted = Signal(int)    # final count (only if not cancelled)
+
+    def __init__(self, folder: str, parent=None):
+        super().__init__(parent)
+        self._folder = folder
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        count = 0
+        for dirpath, dirnames, filenames in os.walk(self._folder):
+            if self._cancelled:
+                return
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for f in filenames:
+                if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS:
+                    count += 1
+            self.progress.emit(count)
+        if not self._cancelled:
+            self.counted.emit(count)
 
 
 class SetupView(QWidget):
@@ -114,28 +144,43 @@ class SetupView(QWidget):
         self._folder_path = folder
         self._path_edit.setText(folder)
 
-        # Quick file count
-        count = self._count_files(folder)
+        # Check for existing session (cheap, stays on the UI thread)
+        self._resume_btn.setVisible(has_existing_session(folder))
+
+        # Count files off the UI thread so a huge/network folder can't freeze
+        # the app mid-click. Show immediate feedback while it runs.
+        self._start_count(folder)
+
+    def _start_count(self, folder: str):
+        self._stop_count()
+        self._count_label.setText("Counting image files…")
+        self._scan_btn.setEnabled(False)
+        worker = _FolderCountWorker(folder, self)
+        worker.progress.connect(self._on_count_progress)
+        worker.counted.connect(self._on_count_done)
+        self._count_worker = worker
+        worker.start()
+
+    def _stop_count(self):
+        worker = getattr(self, "_count_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.wait(2000)
+        self._count_worker = None
+
+    def _on_count_progress(self, count: int):
+        self._count_label.setText(f"Counting… {count} so far")
+
+    def _on_count_done(self, count: int):
         self._count_label.setText(f"{count} supported image files found")
         self._scan_btn.setEnabled(count > 0)
-
-        # Check for existing session
-        self._resume_btn.setVisible(has_existing_session(folder))
 
     def selected_folder(self) -> str:
         """The folder currently chosen on the home screen (may be empty)."""
         return self._folder_path
 
-    def _count_files(self, folder: str) -> int:
-        count = 0
-        for dirpath, dirnames, filenames in os.walk(folder):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-            for f in filenames:
-                if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS:
-                    count += 1
-        return count
-
     def _on_scan(self):
+        self._stop_count()
         if self._folder_path:
             self.scan_requested.emit(self._folder_path)
 

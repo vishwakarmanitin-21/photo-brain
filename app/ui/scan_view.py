@@ -144,7 +144,16 @@ class ScanView(QWidget):
         for lbl in self._stat_labels.values():
             lbl.setText("0")
         self._cancel_btn.setVisible(True)
+        self._cancel_btn.setEnabled(True)
+        self._cancel_btn.setText("Cancel")
         self._continue_btn.setVisible(False)
+
+    def show_cancelling(self):
+        """Immediate feedback the moment Cancel is clicked, before the
+        worker has finished winding down."""
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.setText("Cancelling…")
+        self._phase_label.setText("Cancelling…")
 
     def show_completed(self):
         """Switch UI to completed state with summary visible."""

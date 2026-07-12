@@ -8,7 +8,10 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QComboBox, QApplication, QSlider,
 )
 from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer
-from PySide6.QtGui import QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor
+from PySide6.QtGui import (
+    QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor,
+    QImageReader,
+)
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.scoring import is_low_quality_singleton
@@ -62,6 +65,23 @@ EVENT_FILTER_ALL = "All Events"
 
 QUALITY_FILTER_ALL = "All Quality"
 QUALITY_FILTER_LOW = "Low Quality (no dupes)"
+
+
+HOVER_PREVIEW_MAX = 1000  # hover overlay never needs more than this
+
+
+def load_bounded_pixmap(filepath: str, max_dim: int) -> QPixmap:
+    """Decode an image downscaled to fit max_dim, using the JPEG decoder's
+    own scaling — dramatically faster than loading a full 12–48MP original
+    just to shrink it. Returns a null pixmap on failure."""
+    reader = QImageReader(filepath)
+    reader.setAutoTransform(True)
+    size = reader.size()
+    if size.isValid() and (size.width() > max_dim or size.height() > max_dim):
+        scaled = size.scaled(max_dim, max_dim, Qt.KeepAspectRatio)
+        reader.setScaledSize(scaled)
+    image = reader.read()
+    return QPixmap.fromImage(image) if not image.isNull() else QPixmap()
 
 
 def _format_size(n: float) -> str:
@@ -875,8 +895,9 @@ class ReviewView(QWidget):
         if not photo:
             return
 
-        # Load full-size from original
-        pixmap = QPixmap(photo.filepath)
+        # Decode downscaled to the overlay size — loading a full 12–48MP
+        # original mid-mouse-move would freeze the grid.
+        pixmap = load_bounded_pixmap(photo.filepath, HOVER_PREVIEW_MAX)
         if pixmap.isNull():
             return
 

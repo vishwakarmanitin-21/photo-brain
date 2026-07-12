@@ -4,6 +4,7 @@ import logging
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QMessageBox, QDialog,
+    QApplication,
 )
 from PySide6.QtCore import QTimer, Slot
 
@@ -201,6 +202,10 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _cancel_scan(self):
+        # Paint "Cancelling…" immediately so the click is acknowledged before
+        # we block waiting for the worker's in-flight batch to unwind.
+        self.scan_view.show_cancelling()
+        QApplication.processEvents()
         self._ensure_scan_worker_stopped(5000)
         self.scan_view.stop_timer()
         self._navigate(VIEW_SETUP)
