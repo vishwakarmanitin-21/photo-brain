@@ -5,7 +5,7 @@ from PySide6.QtCore import QThread, Signal
 
 from app.core.scanner import (
     collect_files, compute_hashes, fingerprint_and_score,
-    detect_all_faces, analyze_all_expressions,
+    detect_and_analyze_faces,
     extract_dates, build_photo_events, run_clustering, assign_verdicts,
 )
 from app.core.session_store import SessionStore
@@ -129,15 +129,17 @@ class ScanWorker(QThread):
         if self._cancelled:
             return False
 
-        # Phase 5: Face detection (optional)
+        # Phase 5: Face detection + expression analysis (optional, parallel)
         if self.face_detection_enabled:
-            self.phase_changed.emit("Detecting faces...")
+            self.phase_changed.emit("Analyzing faces...")
 
             def face_progress(cur, total, fname):
                 self.progress_updated.emit("Faces", cur, total)
                 self.current_file.emit(fname)
 
-            face_stats = detect_all_faces(photos, face_progress, self._is_cancelled)
+            face_stats = detect_and_analyze_faces(
+                photos, face_progress, self._is_cancelled
+            )
             if self._cancelled:
                 return False
             self.stats_updated.emit("faces_detected", face_stats["faces_total"])
@@ -145,21 +147,9 @@ class ScanWorker(QThread):
             self.stats_updated.emit("faces_far", face_stats["faces_far"])
             self.stats_updated.emit("faces_none", face_stats["faces_none"])
             self.stats_updated.emit("group_shots", face_stats["group_shots"])
-
-            # Phase 5b: Expression analysis (only on photos with faces)
-            if face_stats["faces_total"] > 0:
-                self.phase_changed.emit("Analyzing expressions...")
-
-                def expr_progress(cur, total, fname):
-                    self.progress_updated.emit("Expressions", cur, total)
-                    self.current_file.emit(fname)
-
-                expr_count = analyze_all_expressions(
-                    photos, expr_progress, self._is_cancelled
-                )
-                if self._cancelled:
-                    return False
-                self.stats_updated.emit("expressions_analyzed", expr_count)
+            self.stats_updated.emit(
+                "expressions_analyzed", face_stats["expressions_analyzed"]
+            )
 
         # Phase 6: EXIF dates + event grouping
         self.phase_changed.emit("Extracting dates...")

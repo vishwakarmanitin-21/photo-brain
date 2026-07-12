@@ -2,6 +2,7 @@
 import os
 import uuid
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Optional
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
@@ -11,13 +12,18 @@ from app.core.scoring import (
     compute_quality_score, _sharpness_from_gray,
 )
 from app.core.clustering import build_clusters, group_by_sha256
-from app.core.faces import detect_faces, analyze_expressions
+from app.core.faces import detect_faces, analyze_expressions, analyze_photo
 from app.core.events import extract_exif_datetime, build_events
 from app.util.paths import SUPPORTED_EXTENSIONS, SKIP_DIRS
 
 log = logging.getLogger("photobrain.scanner")
 
 ProgressCallback = Callable[[int, int, str], None]  # current, total, filename
+
+
+def face_worker_count() -> int:
+    """Threads for the face phase — one below the core count, 2–8."""
+    return max(2, min(8, (os.cpu_count() or 4) - 1))
 
 
 def collect_files(root_folder: str) -> list[str]:
@@ -160,6 +166,86 @@ def compute_scores(
         done += len(group)
         if progress_cb and (done % 50 < len(group) or done == total):
             progress_cb(min(done, total), total, rep.filename)
+
+
+def detect_and_analyze_faces(
+    photos: list[Photo],
+    progress_cb: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    workers: Optional[int] = None,
+) -> dict[str, int]:
+    """Face detection + expression analysis for the whole library, in parallel.
+
+    Runs one worker per SHA256 group representative across a thread pool
+    (each thread has its own mediapipe detector), so the dominant scan
+    cost scales with cores. Results are per-photo independent, so the
+    outcome is identical regardless of completion order. Returns the same
+    stats dict as detect_all_faces plus 'expressions_analyzed'.
+    """
+    sha_groups = group_by_sha256(photos)
+    groups = list(sha_groups.values())
+    total = len(groups)
+    stats = {
+        "faces_total": 0, "faces_close": 0, "faces_far": 0,
+        "faces_none": 0, "group_shots": 0, "expressions_analyzed": 0,
+    }
+    if total == 0:
+        return stats
+
+    workers = workers or face_worker_count()
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_group = {
+            pool.submit(analyze_photo, group[0].filepath): group
+            for group in groups
+        }
+        for future in as_completed(future_to_group):
+            if cancel_check and cancel_check():
+                pool.shutdown(wait=False, cancel_futures=True)
+                return stats
+            group = future_to_group[future]
+            try:
+                r = future.result()
+            except Exception as e:
+                log.warning("Face analysis failed for %s: %s",
+                            group[0].filepath, e)
+                r = {
+                    "face_count": 0, "face_area_ratio": 0.0,
+                    "face_distance": "none", "subject_isolation": 0.0,
+                    "eyes_open": 0.0, "smile": 0.0,
+                    "expression_naturalness": 0.0, "head_pose_frontal": 0.0,
+                }
+
+            fd = FaceDistance(r["face_distance"])
+            n = len(group)
+            for p in group:
+                p.face_count = r["face_count"]
+                p.face_area_ratio = r["face_area_ratio"]
+                p.face_distance = fd
+                p.subject_isolation = r["subject_isolation"]
+                p.eyes_open_score = r["eyes_open"]
+                p.smile_score = r["smile"]
+                p.expression_naturalness = r["expression_naturalness"]
+                p.head_pose_frontal = r["head_pose_frontal"]
+                p.quality_score = rescore_with_faces(p)
+
+            if r["face_count"] > 0:
+                stats["faces_total"] += n
+                if fd == FaceDistance.CLOSE:
+                    stats["faces_close"] += n
+                else:
+                    stats["faces_far"] += n
+                if r["face_count"] >= 3:
+                    stats["group_shots"] += n
+                stats["expressions_analyzed"] += n
+            else:
+                stats["faces_none"] += n
+
+            done += 1
+            if progress_cb and (done % 10 == 0 or done == total):
+                progress_cb(done, total, group[0].filename)
+
+    return stats
 
 
 def detect_all_faces(

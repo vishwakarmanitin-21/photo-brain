@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 import urllib.request
 
 import cv2
@@ -13,9 +14,12 @@ from app.core.image_io import read_image
 
 log = logging.getLogger("photobrain.faces")
 
-# Lazy-loaded singletons
-_detector = None
-_landmarker = None
+# Detectors are held per-thread: a single mediapipe task is not safe for
+# concurrent detect() calls, so the parallel face phase gives each worker
+# thread its own instance. All created instances are tracked for cleanup.
+_thread_local = threading.local()
+_instances: list = []
+_instances_lock = threading.Lock()
 
 _MODELS = {
     "detector": {
@@ -98,17 +102,20 @@ def _get_model_path(model_key: str) -> str:
 
 
 def _get_detector():
-    """Get or create the face detector singleton."""
-    global _detector
-    if _detector is None:
+    """Get or create this thread's face detector."""
+    detector = getattr(_thread_local, "detector", None)
+    if detector is None:
         import mediapipe as mp
         model_path = _get_model_path("detector")
         opts = mp.tasks.vision.FaceDetectorOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
             min_detection_confidence=0.3,
         )
-        _detector = mp.tasks.vision.FaceDetector.create_from_options(opts)
-    return _detector
+        detector = mp.tasks.vision.FaceDetector.create_from_options(opts)
+        _thread_local.detector = detector
+        with _instances_lock:
+            _instances.append(detector)
+    return detector
 
 
 def _detect_at_scale(detector, rgb, scale: float):
@@ -349,9 +356,9 @@ def detect_faces(filepath: str) -> tuple[int, float, str, float]:
 
 
 def _get_landmarker():
-    """Get or create the FaceLandmarker for expression analysis."""
-    global _landmarker
-    if _landmarker is None:
+    """Get or create this thread's FaceLandmarker for expression analysis."""
+    landmarker = getattr(_thread_local, "landmarker", None)
+    if landmarker is None:
         import mediapipe as mp
         model_path = _get_model_path("landmarker")
         opts = mp.tasks.vision.FaceLandmarkerOptions(
@@ -360,8 +367,11 @@ def _get_landmarker():
             output_facial_transformation_matrixes=True,
             num_faces=5,
         )
-        _landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(opts)
-    return _landmarker
+        landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(opts)
+        _thread_local.landmarker = landmarker
+        with _instances_lock:
+            _instances.append(landmarker)
+    return landmarker
 
 
 def _mean(values: list[float]) -> float:
@@ -539,14 +549,49 @@ def analyze_expressions(filepath: str) -> tuple[float, float, float, float]:
         return 0.0, 0.0, 0.0, 0.0
 
 
+def analyze_photo(filepath: str) -> dict:
+    """Detect faces and (if any) analyze expressions for one photo.
+
+    The unit of work for the parallel face phase — self-contained and
+    thread-safe (each thread uses its own detector/landmarker), so it can
+    run in a ThreadPoolExecutor. Expression analysis is skipped when no
+    face is found, sparing the expensive landmarker on scenery shots.
+    """
+    result = {
+        "face_count": 0,
+        "face_area_ratio": 0.0,
+        "face_distance": "none",
+        "subject_isolation": 0.0,
+        "eyes_open": 0.0,
+        "smile": 0.0,
+        "expression_naturalness": 0.0,
+        "head_pose_frontal": 0.0,
+    }
+    face_count, area, dist, isolation = detect_faces(filepath)
+    result["face_count"] = face_count
+    result["face_area_ratio"] = area
+    result["face_distance"] = dist
+    result["subject_isolation"] = isolation
+    if face_count > 0:
+        eyes, smile, natural, frontal = analyze_expressions(filepath)
+        result["eyes_open"] = eyes
+        result["smile"] = smile
+        result["expression_naturalness"] = natural
+        result["head_pose_frontal"] = frontal
+    return result
+
+
 def cleanup():
-    """Release all model resources."""
-    global _detector, _landmarker
-    for resource_name, resource in [("detector", _detector), ("landmarker", _landmarker)]:
-        if resource is not None:
-            try:
-                resource.close()
-            except Exception:
-                log.debug("Error closing %s (ignored)", resource_name)
-    _detector = None
-    _landmarker = None
+    """Release all model resources across every thread that created one."""
+    with _instances_lock:
+        instances = list(_instances)
+        _instances.clear()
+    for resource in instances:
+        try:
+            resource.close()
+        except Exception:
+            log.debug("Error closing a face model resource (ignored)")
+    # Drop this thread's references; other threads' locals are cleared when
+    # their thread ends. Instances are already closed above.
+    _thread_local.detector = None
+    _thread_local.landmarker = None
