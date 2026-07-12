@@ -23,7 +23,8 @@ REVIEW_SHORTCUTS = [
     ("R", "Reset the selected photo to undecided"),
     ("← / →", "Previous / next photo in the group"),
     ("↑ / J / ↓", "Previous / next group"),
-    ("Ctrl+Z", "Undo the last Apply"),
+    ("Ctrl+Z", "Undo your last decision"),
+    ("Ctrl+Shift+Z", "Undo the last Apply (restore moved files)"),
     ("+ / − / 0", "Zoom in / out / reset"),
     ("Alt + hover", "Full-size preview of a photo"),
     ("Ctrl+Enter", "Apply all changes"),
@@ -389,6 +390,10 @@ class ReviewView(QWidget):
         self._current_cluster_idx = -1
         self._selected_photo_id: str | None = None
         self._current_photos: list[Photo] = []  # Current cluster photos
+        # Verdict-level undo: shadow of the last-checkpointed (verdict,
+        # user_override) per photo, and a stack of prior states to restore.
+        self._verdict_shadow: dict[str, tuple] = {}
+        self._verdict_undo_stack: list[list[tuple]] = []
         self._current_display_size = BASE_THUMB_SIZE  # Current thumbnail display size
         self._preview_pixmaps: dict[str, QPixmap] = {}
         self._preview_pixmap_size = BASE_THUMB_SIZE
@@ -398,6 +403,8 @@ class ReviewView(QWidget):
         self._zoom_debounce.timeout.connect(self._apply_zoom_change)
         self._build_ui()
         self._bind_shortcuts()
+        # Record every verdict change as an undo step (single, button, bulk).
+        self.review_state_changed.connect(self._checkpoint_verdicts)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -656,7 +663,8 @@ class ReviewView(QWidget):
         QShortcut(QKeySequence(Qt.Key_Right), self, self._select_next_photo)
         QShortcut(QKeySequence(Qt.Key_Left), self, self._select_prev_photo)
         QShortcut(QKeySequence("Ctrl+Return"), self, self.apply_requested.emit)
-        QShortcut(QKeySequence("Ctrl+Z"), self, self.undo_requested.emit)
+        QShortcut(QKeySequence("Ctrl+Z"), self, self._undo_verdict)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.undo_requested.emit)
         QShortcut(QKeySequence("F1"), self, self._show_shortcuts)
         QShortcut(QKeySequence("?"), self, self._show_shortcuts)
         # Zoom shortcuts
@@ -848,6 +856,8 @@ class ReviewView(QWidget):
         self._cluster_photos = cluster_photos
         self._preview_pixmaps.clear()
         self._undo_btn.setEnabled(has_undo)
+        # Fresh data => start the verdict-undo history from this state.
+        self._reset_verdict_history()
 
         # Build event data
         self._events = events or []
@@ -1043,6 +1053,58 @@ class ReviewView(QWidget):
             if p.id == self._selected_photo_id:
                 return i
         return -1
+
+    # ── Verdict-level undo (Ctrl+Z) ──────────────────────
+
+    def _all_photos(self) -> list[Photo]:
+        photos = []
+        for group in self._cluster_photos.values():
+            photos.extend(group)
+        return photos
+
+    def _reset_verdict_history(self):
+        self._verdict_shadow = {
+            p.id: (p.verdict, p.user_override) for p in self._all_photos()
+        }
+        self._verdict_undo_stack.clear()
+
+    def _checkpoint_verdicts(self):
+        """Record any verdict changes since the last checkpoint as one undo
+        step. Captures single, button and bulk changes uniformly by diffing
+        current photo state against the shadow."""
+        changed = []
+        for p in self._all_photos():
+            old = self._verdict_shadow.get(p.id)
+            cur = (p.verdict, p.user_override)
+            if old is None:
+                self._verdict_shadow[p.id] = cur
+            elif old != cur:
+                changed.append((p.id, old[0], old[1]))
+                self._verdict_shadow[p.id] = cur
+        if changed:
+            self._verdict_undo_stack.append(changed)
+
+    def _undo_verdict(self):
+        """Undo the most recent verdict change(s) — the user's last decision."""
+        if not self._verdict_undo_stack:
+            return
+        entry = self._verdict_undo_stack.pop()
+        by_id = {p.id: p for p in self._all_photos()}
+        for photo_id, verdict, override in entry:
+            p = by_id.get(photo_id)
+            if p is None:
+                continue
+            p.verdict = verdict
+            p.user_override = override
+            self._verdict_shadow[photo_id] = (verdict, override)
+            widget = self._thumb_widgets.get(photo_id)
+            if widget:
+                widget.update_verdict(verdict)
+        self._update_global_counts()
+        self._update_cluster_list_item()
+        # Persist the reverted state; shadow already matches, so this emit
+        # will not record a new undo step.
+        self.review_state_changed.emit()
 
     # ── Verdict actions ──────────────────────────────────
 
