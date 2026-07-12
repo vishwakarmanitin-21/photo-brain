@@ -304,6 +304,12 @@ class MainWindow(QMainWindow):
     def _start_thumb_worker(self, photos):
         if not self.thumb_cache:
             return
+        # Stop any previous thumbnail run before replacing it, so an old
+        # QThread isn't left running unowned (crash risk) with a stale
+        # thumb_ready connection into the review view.
+        if self.thumb_worker and self.thumb_worker.isRunning():
+            self.thumb_worker.cancel()
+            self.thumb_worker.wait(2000)
         self.thumb_worker = ThumbWorker(photos, self.thumb_cache)
         self.thumb_worker.thumb_ready.connect(self.review_view.on_thumb_ready)
         self.thumb_worker.start()

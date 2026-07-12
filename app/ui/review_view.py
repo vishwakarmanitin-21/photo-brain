@@ -40,6 +40,8 @@ MIN_THUMB_SIZE = 120  # Minimum thumbnail size
 MAX_THUMB_SIZE = 800  # Maximum thumbnail size
 BASE_THUMB_SIZE = 180  # Base display size (middle of range)
 THUMB_DISPLAY_SIZE = 180  # Keep for backward compatibility
+THUMB_CACHE_SIZE = 200  # Resolution of cached thumbnails; above this we
+                        # load high-res previews instead
 
 # Colors
 COLOR_KEEP = "#4CAF50"
@@ -785,11 +787,15 @@ class ReviewView(QWidget):
 
     def _rebuild_grid_with_zoom(self):
         """Rebuild thumbnail grid with current zoom level."""
-        # Clear existing grid
+        # Clear existing grid: detach from the tree immediately (setParent)
+        # AND schedule deletion (deleteLater), so old widgets neither linger
+        # in the layout nor leak as parentless orphans.
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
-            if item.widget():
-                item.widget().setParent(None)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+                widget.deleteLater()
 
         self._thumb_widgets.clear()
 
@@ -816,7 +822,7 @@ class ReviewView(QWidget):
             widget.update_size(display_size)
 
             # Load high-res or cached thumbnail
-            if display_size > 200:
+            if display_size > THUMB_CACHE_SIZE:
                 pixmap = self._preview_pixmaps.get(photo.id, QPixmap())
                 if pixmap.isNull():
                     if photo.thumb_path and os.path.isfile(photo.thumb_path):
@@ -934,10 +940,15 @@ class ReviewView(QWidget):
     @Slot(str, str)
     def on_thumb_ready(self, photo_id: str, thumb_path: str):
         widget = self._thumb_widgets.get(photo_id)
-        if widget and os.path.isfile(thumb_path):
-            pixmap = QPixmap(thumb_path)
-            if not pixmap.isNull():
-                widget.set_pixmap(pixmap)
+        if not widget or not os.path.isfile(thumb_path):
+            return
+        # Don't let a late 200px thumbnail overwrite a high-res preview the
+        # user already zoomed into.
+        if widget._display_size > THUMB_CACHE_SIZE:
+            return
+        pixmap = QPixmap(thumb_path)
+        if not pixmap.isNull():
+            widget.set_pixmap(pixmap)
 
     # ── Filtering ────────────────────────────────────────
 

@@ -252,9 +252,9 @@
   <tr><td class="id">UX-03</td><td><span class="badge b-high">High</span></td>
     <td>Hover preview loads the full-resolution original synchronously mid-mouse-move; folder picker walks the whole tree synchronously after Browse (app looks hung on huge/network folders); Cancel blocks the UI for up to 5s. Fix: async loads + chunked counting + signal-driven navigation.</td>
     <td class="loc">review_view.py:712 · setup_view.py:118-132 · main_window.py:134</td><td><span class="badge b-eff">M</span></td></tr>
-  <tr><td class="id">UX-04</td><td><span class="badge b-high">High</span></td>
-    <td>Thread/widget hygiene: a new ThumbWorker starts on every review load without stopping the old one (crash risk); zoom teardown uses <code>setParent(None)</code> instead of <code>deleteLater()</code> (leaks); late thumbnails downgrade already-loaded high-res images.</td>
-    <td class="loc">main_window.py:220-225 · review_view.py:663-667,765-771</td><td><span class="badge b-eff">M</span></td></tr>
+  <tr><td class="id">UX-04</td><td><span class="badge b-high">High</span> <span class="badge b-ship">SHIPPED</span></td>
+    <td>Thread/widget hygiene, all three shipped: a new review load now cancels + waits for the previous ThumbWorker before replacing it (no unowned running QThread); the zoom teardown detaches (<code>setParent(None)</code>) <i>and</i> <code>deleteLater()</code>s each widget (immediate removal + no orphan leak); and a late 200px thumbnail is skipped when the user has zoomed into a high-res preview. 3 tests.</td>
+    <td class="loc">ui/main_window.py · ui/review_view.py</td><td><span class="badge b-eff">M</span></td></tr>
 </table></div>
 
 <h3>Workflow &amp; discoverability</h3>
