@@ -3,7 +3,8 @@ import hashlib
 import logging
 from typing import Optional
 
-from PIL import Image
+import numpy as np
+from PIL import Image, ImageFile
 import imagehash
 
 log = logging.getLogger("photobrain.hashing")
@@ -37,6 +38,33 @@ def compute_phash(filepath: str, hash_size: int = 8) -> Optional[str]:
     except Exception as e:
         log.warning("Cannot compute pHash for %s: %s", filepath, e)
         return None
+
+
+def phash_and_gray(
+    filepath: str, hash_size: int = 8
+) -> tuple[Optional[str], Optional["np.ndarray"]]:
+    """Decode once → (pHash string, grayscale array), verifying integrity.
+
+    pHash and quality scoring both need the decoded image; computing them
+    from a single decode halves the per-photo decode cost, the dominant
+    time on large libraries. Truncated loading is disabled so a damaged
+    file raises here and comes back (None, None) — unhashable and
+    unscoreable — instead of yielding partial pixels. PIL 'L' uses the
+    same ITU-R 601 luma weights as OpenCV, so sharpness/brightness match.
+    """
+    previous = ImageFile.LOAD_TRUNCATED_IMAGES
+    ImageFile.LOAD_TRUNCATED_IMAGES = False
+    try:
+        with Image.open(filepath) as img:
+            img.load()  # full decode; raises on truncation
+            phash = str(imagehash.phash(img, hash_size=hash_size))
+            gray = np.asarray(img.convert("L"))
+        return phash, gray
+    except Exception as e:
+        log.warning("Cannot fingerprint/score %s: %s", filepath, e)
+        return None, None
+    finally:
+        ImageFile.LOAD_TRUNCATED_IMAGES = previous
 
 
 def hamming_distance(hash1: str, hash2: str) -> int:

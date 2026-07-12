@@ -4,8 +4,8 @@ import logging
 from PySide6.QtCore import QThread, Signal
 
 from app.core.scanner import (
-    collect_files, compute_hashes, compute_phashes,
-    compute_scores, detect_all_faces, analyze_all_expressions,
+    collect_files, compute_hashes, fingerprint_and_score,
+    detect_all_faces, analyze_all_expressions,
     extract_dates, build_photo_events, run_clustering, assign_verdicts,
 )
 from app.core.session_store import SessionStore
@@ -116,27 +116,16 @@ class ScanWorker(QThread):
         # Persist photos
         self.store.insert_photos_batch(self.session_id, photos)
 
-        # Phase 3: pHash
-        self.phase_changed.emit("Computing perceptual hashes...")
+        # Phase 3+4: fingerprint (pHash) + quality score in one decode pass
+        self.phase_changed.emit("Fingerprinting and scoring...")
 
-        def phash_progress(cur, total, fname):
-            self.progress_updated.emit("pHash", cur, total)
-            self.current_file.emit(fname)
-            self.stats_updated.emit("phash_computed", cur)
-
-        compute_phashes(photos, phash_progress, self._is_cancelled)
-        if self._cancelled:
-            return False
-
-        # Phase 4: Quality scoring
-        self.phase_changed.emit("Scoring image quality...")
-
-        def score_progress(cur, total, fname):
+        def fp_progress(cur, total, fname):
             self.progress_updated.emit("Scoring", cur, total)
             self.current_file.emit(fname)
+            self.stats_updated.emit("phash_computed", cur)
             self.stats_updated.emit("scored", cur)
 
-        compute_scores(photos, score_progress, self._is_cancelled)
+        fingerprint_and_score(photos, fp_progress, self._is_cancelled)
         if self._cancelled:
             return False
 

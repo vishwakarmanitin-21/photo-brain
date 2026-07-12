@@ -5,9 +5,10 @@ import logging
 from typing import Callable, Optional
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
-from app.core.hashing import compute_sha256, compute_phash
+from app.core.hashing import compute_sha256, compute_phash, phash_and_gray
 from app.core.scoring import (
     score_photo, suggest_verdicts, rescore_with_faces, effective_keep_count,
+    compute_quality_score, _sharpness_from_gray,
 )
 from app.core.clustering import build_clusters, group_by_sha256
 from app.core.faces import detect_faces, analyze_expressions
@@ -67,6 +68,44 @@ def compute_hashes(
             progress_cb(i + 1, total, photo.filename)
 
     return photos
+
+
+def fingerprint_and_score(
+    photos: list[Photo],
+    progress_cb: Optional[ProgressCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> None:
+    """Compute pHash + quality score for each SHA group from one decode.
+
+    Replaces the separate compute_phashes + compute_scores passes so each
+    representative image is decoded once instead of twice.
+    """
+    sha_groups = group_by_sha256(photos)
+    total = len(photos)
+    done = 0
+    for sha_key, group in sha_groups.items():
+        if cancel_check and cancel_check():
+            return
+
+        rep = group[0]
+        phash, gray = phash_and_gray(rep.filepath)
+        if gray is None:
+            sharpness = 0.0
+            brightness = 0.0
+        else:
+            sharpness = _sharpness_from_gray(gray)
+            brightness = float(gray.mean())
+        quality = compute_quality_score(sharpness, brightness)
+
+        for p in group:
+            p.phash = phash
+            p.sharpness = sharpness
+            p.brightness = brightness
+            p.quality_score = quality
+
+        done += len(group)
+        if progress_cb and (done % 50 < len(group) or done == total):
+            progress_cb(min(done, total), total, rep.filename)
 
 
 def compute_phashes(
