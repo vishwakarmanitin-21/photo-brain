@@ -12,6 +12,7 @@ from app.core.scoring import (
     compute_quality_score, _sharpness_from_gray,
 )
 from app.core.clustering import build_clusters, group_by_sha256
+from app.core import faces
 from app.core.faces import detect_faces, analyze_expressions, analyze_photo
 from app.core.events import extract_exif_datetime, build_events
 from app.util.paths import SUPPORTED_EXTENSIONS, SKIP_DIRS
@@ -197,6 +198,7 @@ def detect_and_analyze_faces(
     progress_cb: Optional[ProgressCallback] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     workers: Optional[int] = None,
+    min_confidence: Optional[float] = None,
 ) -> dict[str, int]:
     """Face detection + expression analysis for the whole library, in parallel.
 
@@ -215,6 +217,11 @@ def detect_and_analyze_faces(
     }
     if total == 0:
         return stats
+
+    # Set the confidence threshold once on the main thread before the worker
+    # pool starts reading it (QUAL-01).
+    if min_confidence is not None:
+        faces.set_min_confidence(min_confidence)
 
     workers = workers or face_worker_count()
     done = 0

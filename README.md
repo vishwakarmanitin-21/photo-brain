@@ -173,6 +173,7 @@ Accessible from the home screen:
 | Keep per group | 2 | Number of best photos to suggest keeping per group. |
 | Event Gap (hours) | 4.0 | Time gap between EXIF timestamps to split into separate events. |
 | Face Detection | On | Enable/disable face detection and expression analysis. |
+| Face confidence | 50% | How sure the app must be before counting something as a face. Higher = fewer false faces; lower = catches fainter/distant faces. |
 
 Window size, zoom level, the hide-single-photos toggle, and these settings are all remembered between launches. The app follows your Windows light/dark theme.
 

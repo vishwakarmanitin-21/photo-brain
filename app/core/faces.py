@@ -44,6 +44,37 @@ _MODELS = {
 # Original image catches close-up faces; downscaled versions catch distant ones.
 _DOWNSCALE_FACTORS = [0.5, 0.25]
 
+# QUAL-01: minimum detector confidence a detection must reach to be counted.
+# The mediapipe detector runs with a permissive 0.3 floor; this post-filter is
+# the user-tunable threshold that keeps low-confidence false faces from
+# inflating the quality score. Set once (main thread) before the face pool
+# starts, then read by worker threads.
+DEFAULT_FACE_MIN_CONFIDENCE = 0.5
+_min_confidence = DEFAULT_FACE_MIN_CONFIDENCE
+
+
+def set_min_confidence(value: float) -> None:
+    global _min_confidence
+    try:
+        _min_confidence = max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        _min_confidence = DEFAULT_FACE_MIN_CONFIDENCE
+
+
+def get_min_confidence() -> float:
+    return _min_confidence
+
+
+def _detection_confidence(det) -> float:
+    """Detection confidence in [0,1]; 1.0 (never filtered) if unavailable."""
+    cats = getattr(det, "categories", None)
+    if cats:
+        try:
+            return float(cats[0].score)
+        except (IndexError, AttributeError, TypeError, ValueError):
+            return 1.0
+    return 1.0
+
 
 def _bundled_model_path(filename: str):
     """Return the model shipped inside the app package, if present."""
@@ -118,6 +149,13 @@ def _get_detector():
     return detector
 
 
+def _filter_confident(detections):
+    """Drop detections below the current confidence threshold (QUAL-01)."""
+    if not detections:
+        return []
+    return [d for d in detections if _detection_confidence(d) >= _min_confidence]
+
+
 def _detect_at_scale(detector, rgb, scale: float):
     """Run face detection on a scaled version of the image.
 
@@ -128,7 +166,7 @@ def _detect_at_scale(detector, rgb, scale: float):
     if scale >= 1.0:
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = detector.detect(mp_image)
-        return result.detections or []
+        return _filter_confident(result.detections)
 
     h, w = rgb.shape[:2]
     new_w = max(int(w * scale), 1)
@@ -138,13 +176,15 @@ def _detect_at_scale(detector, rgb, scale: float):
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=scaled)
     result = detector.detect(mp_image)
 
-    if not result.detections:
+    confident = _filter_confident(result.detections)
+    if not confident:
         return []
+    result_detections = confident
 
     # Map bounding boxes back to original image coordinates
     inv_scale = 1.0 / scale
     mapped = []
-    for det in result.detections:
+    for det in result_detections:
         bb = det.bounding_box
         bb.origin_x = int(bb.origin_x * inv_scale)
         bb.origin_y = int(bb.origin_y * inv_scale)

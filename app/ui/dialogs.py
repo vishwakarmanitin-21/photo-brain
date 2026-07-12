@@ -33,6 +33,7 @@ class SettingsDialog(QDialog):
         face_detection_enabled: bool = True,
         parent=None,
         source_folder: str = "",
+        face_min_confidence: float = 0.5,
     ):
         super().__init__(parent)
         self._source_folder = source_folder
@@ -124,6 +125,19 @@ class SettingsDialog(QDialog):
         )
         detect_form.addRow(self._face_checkbox)
 
+        # QUAL-01: how sure the app must be before counting something as a face.
+        self._face_conf_spin = QSpinBox()
+        self._face_conf_spin.setRange(10, 95)
+        self._face_conf_spin.setSuffix(" %")
+        self._face_conf_spin.setValue(round(face_min_confidence * 100))
+        self._face_conf_spin.setToolTip(
+            "How sure the app must be that something is a face before it counts. "
+            "Higher = fewer false faces (e.g. patterns mistaken for faces); "
+            "lower = catches more faint or distant faces.")
+        detect_form.addRow("Face confidence:", self._face_conf_spin)
+        self._face_conf_spin.setEnabled(face_detection_enabled)
+        self._face_checkbox.toggled.connect(self._face_conf_spin.setEnabled)
+
         detect_group.setLayout(detect_form)
         layout.addWidget(detect_group)
 
@@ -203,6 +217,9 @@ class SettingsDialog(QDialog):
 
     def face_detection_enabled(self) -> bool:
         return self._face_checkbox.isChecked()
+
+    def face_min_confidence(self) -> float:
+        return self._face_conf_spin.value() / 100.0
 
 
 class ApplyConfirmDialog(QDialog):

@@ -49,6 +49,17 @@ class SettingsPresetTests(unittest.TestCase):
         self.assertEqual("Custom", d._preset_combo.currentText())
         self.assertEqual(3, d.threshold())
 
+    def test_face_confidence_round_trips(self):
+        d = SettingsDialog(face_min_confidence=0.7)
+        self.addCleanup(d.deleteLater)
+        self.assertEqual(70, d._face_conf_spin.value())
+        self.assertAlmostEqual(0.7, d.face_min_confidence())
+
+    def test_face_confidence_disabled_with_detection_off(self):
+        d = SettingsDialog(face_detection_enabled=False)
+        self.addCleanup(d.deleteLater)
+        self.assertFalse(d._face_conf_spin.isEnabled())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,6 +38,7 @@ class AppSettings:
     K_KEEP = "scan/keep_per_cluster"
     K_EVENT_GAP = "scan/event_gap_hours"
     K_FACES = "scan/face_detection"
+    K_FACE_CONF = "scan/face_min_confidence"
     K_ZOOM = "review/zoom"
     K_HIDE_SINGLETONS = "review/hide_singletons"
 
@@ -64,12 +65,17 @@ class AppSettings:
     def face_detection(self, default: bool) -> bool:
         return _to_bool(self._s.value(self.K_FACES), default)
 
+    def face_min_confidence(self, default: float) -> float:
+        return _to_float(self._s.value(self.K_FACE_CONF), default)
+
     def save_scan_defaults(self, threshold: int, keep: int,
-                           event_gap: float, faces: bool) -> None:
+                           event_gap: float, faces: bool,
+                           face_min_confidence: float = 0.5) -> None:
         self._s.setValue(self.K_THRESHOLD, int(threshold))
         self._s.setValue(self.K_KEEP, int(keep))
         self._s.setValue(self.K_EVENT_GAP, float(event_gap))
         self._s.setValue(self.K_FACES, bool(faces))
+        self._s.setValue(self.K_FACE_CONF, float(face_min_confidence))
 
     # ── Review preferences ──
     def zoom(self, default: int) -> int:

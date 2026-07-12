@@ -31,6 +31,7 @@ class ScanWorker(QThread):
         keep_per_cluster: int = 2,
         event_gap_hours: float = 4.0,
         face_detection_enabled: bool = True,
+        face_min_confidence: float = 0.5,
     ):
         super().__init__()
         self.source_folder = source_folder
@@ -40,6 +41,7 @@ class ScanWorker(QThread):
         self.keep_per_cluster = keep_per_cluster
         self.event_gap_hours = event_gap_hours
         self.face_detection_enabled = face_detection_enabled
+        self.face_min_confidence = face_min_confidence
         self._cancelled = False
 
     def cancel(self):
@@ -138,7 +140,8 @@ class ScanWorker(QThread):
                 self.current_file.emit(fname)
 
             face_stats = detect_and_analyze_faces(
-                photos, face_progress, self._is_cancelled
+                photos, face_progress, self._is_cancelled,
+                min_confidence=self.face_min_confidence,
             )
             if self._cancelled:
                 return False

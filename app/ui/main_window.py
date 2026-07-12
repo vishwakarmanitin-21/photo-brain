@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         self._keep_per_cluster = self._settings.keep_per_cluster(2)
         self._event_gap_hours = self._settings.event_gap_hours(4.0)
         self._face_detection_enabled = self._settings.face_detection(True)
+        self._face_min_confidence = self._settings.face_min_confidence(0.5)
 
         self._review_save_timer = QTimer(self)
         self._review_save_timer.setSingleShot(True)
@@ -220,6 +221,7 @@ class MainWindow(QMainWindow):
             folder, self.store, self.session_id,
             self._phash_threshold, self._keep_per_cluster,
             self._event_gap_hours, self._face_detection_enabled,
+            face_min_confidence=self._face_min_confidence,
         )
         self.scan_worker.progress_updated.connect(self.scan_view.update_progress)
         self.scan_worker.current_file.connect(self.scan_view.update_current_file)
@@ -602,16 +604,19 @@ class MainWindow(QMainWindow):
             self._phash_threshold, self._keep_per_cluster,
             self._event_gap_hours, self._face_detection_enabled,
             self, source_folder=folder,
+            face_min_confidence=self._face_min_confidence,
         )
         if dialog.exec() == QDialog.Accepted:
             self._phash_threshold = dialog.threshold()
             self._keep_per_cluster = dialog.keep_count()
             self._event_gap_hours = dialog.event_gap_hours()
             self._face_detection_enabled = dialog.face_detection_enabled()
+            self._face_min_confidence = dialog.face_min_confidence()
             # Remember these as the defaults for next launch (UX-13).
             self._settings.save_scan_defaults(
                 self._phash_threshold, self._keep_per_cluster,
                 self._event_gap_hours, self._face_detection_enabled,
+                face_min_confidence=self._face_min_confidence,
             )
 
     # ── Cleanup ──────────────────────────────────────────
