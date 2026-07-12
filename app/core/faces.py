@@ -364,42 +364,64 @@ def _get_landmarker():
     return _landmarker
 
 
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _worst_leaning(values: list[float], weight: float = 0.7) -> float:
+    """Blend toward the minimum so one bad face is felt in a group shot.
+
+    A pure minimum lets a single noisy detection collapse an otherwise
+    great photo; a pure mean lets one person blinking hide behind four
+    open-eyed faces. Leaning 70% toward the worst face splits the
+    difference — a closed-eye meaningfully drags the score without a lone
+    false blink tanking it.
+    """
+    if not values:
+        return 0.0
+    return weight * min(values) + (1.0 - weight) * _mean(values)
+
+
 def _extract_blendshape_scores(face_blendshapes, facial_transformation_matrixes=None) -> tuple[float, float, float, float]:
-    """Extract average expression scores and head pose from blendshapes + matrices.
+    """Extract aggregate expression scores and head pose from blendshapes.
+
+    Eyes-open is aggregated toward the worst face (a blink should hurt a
+    group shot); smile, naturalness and pose are averaged.
 
     Returns:
         (eyes_open, smile, expression_naturalness, head_pose_frontal)
     """
-    total_eyes_open = 0.0
-    total_smile = 0.0
-    total_naturalness = 0.0
-    total_frontal = 0.0
-    num_faces = len(face_blendshapes)
+    eyes_values: list[float] = []
+    smile_values: list[float] = []
+    naturalness_values: list[float] = []
+    frontal_values: list[float] = []
 
     for i, face_shapes in enumerate(face_blendshapes):
         # Eyes open = 1.0 - blink (blink 0=open, 1=closed)
         blink_left = face_shapes[9].score if len(face_shapes) > 9 else 0.0
         blink_right = face_shapes[10].score if len(face_shapes) > 10 else 0.0
         eyes_open = 1.0 - (blink_left + blink_right) / 2.0
-        total_eyes_open += max(0.0, eyes_open)
+        eyes_values.append(max(0.0, eyes_open))
 
         # Smile = average of left and right
         smile_left = face_shapes[44].score if len(face_shapes) > 44 else 0.0
         smile_right = face_shapes[45].score if len(face_shapes) > 45 else 0.0
-        total_smile += (smile_left + smile_right) / 2.0
+        smile_values.append((smile_left + smile_right) / 2.0)
 
         # Expression naturalness
-        total_naturalness += _compute_expression_naturalness(face_shapes)
+        naturalness_values.append(_compute_expression_naturalness(face_shapes))
 
         # Head pose frontal (if matrices available)
         if facial_transformation_matrixes and i < len(facial_transformation_matrixes):
-            total_frontal += _compute_head_pose_frontal(facial_transformation_matrixes[i])
+            frontal_values.append(
+                _compute_head_pose_frontal(facial_transformation_matrixes[i])
+            )
 
     return (
-        round(total_eyes_open / num_faces, 4),
-        round(total_smile / num_faces, 4),
-        round(total_naturalness / num_faces, 4),
-        round(total_frontal / num_faces, 4) if facial_transformation_matrixes else 0.0,
+        round(_worst_leaning(eyes_values), 4),
+        round(_mean(smile_values), 4),
+        round(_mean(naturalness_values), 4),
+        round(_mean(frontal_values), 4) if facial_transformation_matrixes else 0.0,
     )
 
 
@@ -468,11 +490,13 @@ def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float, float, float]
     if not all_eyes:
         return 0.0, 0.0, 0.0, 0.0
 
+    # Each crop is one face, so aggregate across crops the same way as
+    # across faces in a single result: eyes lean to the worst face.
     return (
-        round(sum(all_eyes) / len(all_eyes), 4),
-        round(sum(all_smile) / len(all_smile), 4),
-        round(sum(all_naturalness) / len(all_naturalness), 4),
-        round(sum(all_frontal) / len(all_frontal), 4),
+        round(_worst_leaning(all_eyes), 4),
+        round(_mean(all_smile), 4),
+        round(_mean(all_naturalness), 4),
+        round(_mean(all_frontal), 4),
     )
 
 
