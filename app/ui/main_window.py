@@ -13,7 +13,9 @@ from app.ui.review_view import ReviewView
 from app.ui.dialogs import SettingsDialog, ApplyConfirmDialog, UndoResultDialog
 from app.core.session_store import SessionStore
 from app.core.models import SessionStatus, Verdict
-from app.core.thumbnails import PreviewCache, ThumbnailCache
+from app.core.thumbnails import (
+    PreviewCache, ThumbnailCache, valid_keys as thumbnail_valid_keys,
+)
 from app.core.file_ops import FileOperator, find_last_copy_deletions
 from app.workers.scan_worker import ScanWorker
 from app.workers.thumb_worker import ThumbWorker
@@ -268,9 +270,22 @@ class MainWindow(QMainWindow):
         all_photos = []
         for photos in cluster_photos.values():
             all_photos.extend(photos)
+        self._prune_caches(all_photos)
         self._start_thumb_worker(all_photos)
 
         self._navigate(VIEW_REVIEW)
+
+    def _prune_caches(self, photos):
+        """Drop cache files not belonging to the current library, so the
+        thumbnail/preview caches stay bounded across rescans."""
+        keep = thumbnail_valid_keys(photos)
+        try:
+            if self.thumb_cache:
+                self.thumb_cache.prune(keep)
+            if self.preview_cache:
+                self.preview_cache.prune(keep)
+        except Exception:
+            log.exception("Cache prune failed")
 
     def _start_thumb_worker(self, photos):
         if not self.thumb_cache:

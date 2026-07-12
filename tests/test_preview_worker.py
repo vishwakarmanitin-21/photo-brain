@@ -59,7 +59,7 @@ class PreviewWorkerTests(unittest.TestCase):
             image = emitted[2]
             self.assertLessEqual(image.width(), 400)
             self.assertLessEqual(image.height(), 400)
-            self.assertTrue(os.path.isfile(cache.get_preview_path("photo-1", 400)))
+            self.assertTrue(os.path.isfile(cache.get_preview_path(photo, 400)))
 
 
 if __name__ == "__main__":
