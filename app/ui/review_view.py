@@ -27,7 +27,8 @@ REVIEW_SHORTCUTS = [
     ("R", "Reset the selected photo to undecided"),
     ("C", "Compare this group's photos side by side"),
     ("← / →", "Previous / next photo in the group"),
-    ("↑ / J / ↓", "Previous / next group"),
+    ("↑ / ↓", "Move up / down a row in the photo grid"),
+    ("J / PageDown / PageUp", "Next / previous group"),
     ("Ctrl+Z", "Undo your last decision"),
     ("Ctrl+Shift+Z", "Undo the last Apply (restore moved files)"),
     ("+ / − / 0", "Zoom in / out / reset"),
@@ -52,6 +53,14 @@ COLOR_ARCHIVE = "#FF9800"
 COLOR_DELETE = "#F44336"
 COLOR_REVIEW = "#9E9E9E"
 COLOR_SELECTED = "#2196F3"
+
+# Colour-independent verdict badge letters (UX-12, colour-blind accessibility)
+VERDICT_BADGE_LETTER = {
+    Verdict.KEEP: "K",
+    Verdict.ARCHIVE: "A",
+    Verdict.DELETE: "D",
+    Verdict.REVIEW: "?",
+}
 
 # Filter constants
 FACE_FILTER_ALL = "All Photos"
@@ -305,6 +314,14 @@ class ThumbnailWidget(QFrame):
         self._verdict_label.setStyleSheet("font-size: 10px; font-weight: bold;")
         layout.addWidget(self._verdict_label)
 
+        # Corner badge — a distinct LETTER per verdict so the state is readable
+        # without relying on border colour alone (colour-blind safe). (UX-12)
+        self._verdict_badge = QLabel(self)
+        self._verdict_badge.setAlignment(Qt.AlignCenter)
+        self._verdict_badge.setFixedSize(22, 22)
+        self._verdict_badge.move(10, 10)
+        self._verdict_badge.raise_()
+
     def _on_verdict_btn(self, verdict: Verdict):
         self.photo.user_override = True
         self.update_verdict(verdict)
@@ -380,6 +397,16 @@ class ThumbnailWidget(QFrame):
         # Verdict label color
         self._verdict_label.setStyleSheet(
             f"font-size: 10px; font-weight: bold; color: {border_color};"
+        )
+
+        # Corner letter badge — colour-independent verdict cue (UX-12).
+        letter = VERDICT_BADGE_LETTER.get(verdict, "?")
+        self._verdict_badge.setText(letter)
+        self._verdict_badge.setToolTip(verdict.value)
+        self._verdict_badge.setStyleSheet(
+            f"QLabel {{ background-color: {border_color}; color: white; "
+            f"font-size: 12px; font-weight: bold; border: 1px solid white; "
+            f"border-radius: 11px; }}"
         )
 
     def mousePressEvent(self, event):
@@ -728,10 +755,14 @@ class ReviewView(QWidget):
         sc("D", self._mark_delete)
         sc("R", self._mark_review)
         sc("J", self._next_cluster)
-        sc(Qt.Key_Down, self._next_cluster)
-        sc(Qt.Key_Up, self._prev_cluster)
+        sc(Qt.Key_PageDown, self._next_cluster)
+        sc(Qt.Key_PageUp, self._prev_cluster)
+        # Arrows navigate the photo grid itself (UX-12): Left/Right by one,
+        # Up/Down by a full row.
         sc(Qt.Key_Right, self._select_next_photo)
         sc(Qt.Key_Left, self._select_prev_photo)
+        sc(Qt.Key_Down, self._select_photo_below)
+        sc(Qt.Key_Up, self._select_photo_above)
         sc("Ctrl+Return", self.apply_requested.emit)
         sc("Ctrl+Z", self._undo_verdict)
         sc("Ctrl+Shift+Z", self.undo_requested.emit)
@@ -1409,6 +1440,24 @@ class ReviewView(QWidget):
         photos = self._get_current_photos()
         if idx > 0:
             self._select_photo(photos[idx - 1].id)
+
+    def _select_photo_below(self):
+        self._move_selection_by_rows(1)
+
+    def _select_photo_above(self):
+        self._move_selection_by_rows(-1)
+
+    def _move_selection_by_rows(self, direction: int):
+        """Move the grid selection up/down by one full row (UX-12)."""
+        photos = self._get_current_photos()
+        if not photos:
+            return
+        idx = self._selected_photo_index()
+        cols = self._get_grid_columns()
+        target = idx + direction * cols
+        target = max(0, min(target, len(photos) - 1))
+        if target != idx:
+            self._select_photo(photos[target].id)
 
     # ── Status updates ───────────────────────────────────
 
