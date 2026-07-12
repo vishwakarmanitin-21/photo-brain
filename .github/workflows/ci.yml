@@ -15,7 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # numpy 2.5 and scipy 1.18 (pinned) require Python >= 3.12, so
+        # 3.10/3.11 can't install the deps. Match the tested range.
+        python-version: ["3.12", "3.13"]
 
     steps:
       - name: Check out repository

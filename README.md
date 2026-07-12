@@ -20,8 +20,8 @@ A local-first Windows desktop application for cleaning and organizing large batc
 
 ## Requirements
 
-- Python 3.10 – 3.13 (developed and tested on 3.13; mediapipe wheels can lag
-  brand-new Python releases, so very recent versions may not install yet)
+- Python 3.12 – 3.13 (the pinned numpy/scipy require 3.12+; developed and
+  tested on 3.13). End users of the packaged .exe need no Python at all.
 - Windows 10/11 (64-bit)
 
 ## Installation
