@@ -1,9 +1,18 @@
 """Dialogs for settings, apply confirmation, and undo results."""
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QPushButton,
     QDoubleSpinBox, QCheckBox, QDialogButtonBox, QFormLayout, QGroupBox,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt
+
+
+def _format_bytes(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
 
 
 class SettingsDialog(QDialog):
@@ -14,8 +23,10 @@ class SettingsDialog(QDialog):
         event_gap_hours: float = 4.0,
         face_detection_enabled: bool = True,
         parent=None,
+        source_folder: str = "",
     ):
         super().__init__(parent)
+        self._source_folder = source_folder
         self.setWindowTitle("Settings")
         self.setMinimumWidth(350)
 
@@ -82,6 +93,24 @@ class SettingsDialog(QDialog):
         detect_group.setLayout(detect_form)
         layout.addWidget(detect_group)
 
+        # Storage group — thumbnail/preview cache management
+        storage_group = QGroupBox("Storage")
+        storage_layout = QVBoxLayout()
+        self._cache_label = QLabel()
+        self._cache_label.setStyleSheet("font-size: 11px; color: #666;")
+        storage_layout.addWidget(self._cache_label)
+        self._clear_cache_btn = QPushButton("Clear Cache")
+        self._clear_cache_btn.setToolTip(
+            "Delete cached thumbnails and previews for this folder. They "
+            "rebuild automatically the next time you view photos. Your "
+            "photos and review progress are not affected."
+        )
+        self._clear_cache_btn.clicked.connect(self._on_clear_cache)
+        storage_layout.addWidget(self._clear_cache_btn)
+        storage_group.setLayout(storage_layout)
+        layout.addWidget(storage_group)
+        self._refresh_cache_label()
+
         # Mode info
         mode_label = QLabel("Mode: Assisted (review all suggestions before apply)")
         mode_label.setStyleSheet("font-size: 11px; color: #666; margin-top: 8px;")
@@ -92,6 +121,27 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _refresh_cache_label(self):
+        if not self._source_folder:
+            self._cache_label.setText("Cache: scan a folder first")
+            self._clear_cache_btn.setEnabled(False)
+            return
+        from app.core.thumbnails import image_cache_bytes
+        size = image_cache_bytes(self._source_folder)
+        self._cache_label.setText(f"Thumbnail cache: {_format_bytes(size)}")
+        self._clear_cache_btn.setEnabled(size > 0)
+
+    def _on_clear_cache(self):
+        from app.core.thumbnails import clear_image_caches
+        freed = clear_image_caches(self._source_folder)
+        self._refresh_cache_label()
+        QMessageBox.information(
+            self, "Cache Cleared",
+            f"Freed {_format_bytes(freed)} of thumbnail cache.\n\n"
+            "Thumbnails rebuild automatically the next time you view photos. "
+            "Your photos and review progress were not affected.",
+        )
 
     def threshold(self) -> int:
         return self._threshold_spin.value()

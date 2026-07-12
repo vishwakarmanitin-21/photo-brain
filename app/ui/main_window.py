@@ -505,10 +505,13 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _show_settings(self):
+        # Cache is per source folder; prefer the active session's folder,
+        # else whatever is selected on the home screen.
+        folder = self.source_folder or self.setup_view.selected_folder()
         dialog = SettingsDialog(
             self._phash_threshold, self._keep_per_cluster,
             self._event_gap_hours, self._face_detection_enabled,
-            self,
+            self, source_folder=folder,
         )
         if dialog.exec() == QDialog.Accepted:
             self._phash_threshold = dialog.threshold()

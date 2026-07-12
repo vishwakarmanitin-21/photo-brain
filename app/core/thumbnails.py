@@ -198,3 +198,40 @@ def _clear_dir(cache_dir: str):
                 os.remove(fp)
             except OSError:
                 pass
+
+
+def _dir_bytes(cache_dir: str) -> int:
+    total = 0
+    try:
+        entries = os.listdir(cache_dir)
+    except OSError:
+        return 0
+    for name in entries:
+        fp = os.path.join(cache_dir, name)
+        if os.path.isfile(fp):
+            try:
+                total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+def image_cache_bytes(source_folder: str) -> int:
+    """Total on-disk size of the thumbnail + preview caches for a folder."""
+    from app.util.paths import get_thumb_dir, get_preview_dir
+    return _dir_bytes(get_thumb_dir(source_folder)) + \
+        _dir_bytes(get_preview_dir(source_folder))
+
+
+def clear_image_caches(source_folder: str) -> int:
+    """Delete all cached thumbnails and previews for a folder.
+
+    Leaves the session database and apply logs intact — only the
+    regenerable image caches are removed. Returns the bytes freed.
+    """
+    from app.util.paths import get_thumb_dir, get_preview_dir
+    freed = image_cache_bytes(source_folder)
+    _clear_dir(get_thumb_dir(source_folder))
+    _clear_dir(get_preview_dir(source_folder))
+    log.info("Cleared %d bytes of image cache for %s", freed, source_folder)
+    return freed

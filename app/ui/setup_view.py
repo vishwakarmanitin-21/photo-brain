@@ -122,6 +122,10 @@ class SetupView(QWidget):
         # Check for existing session
         self._resume_btn.setVisible(has_existing_session(folder))
 
+    def selected_folder(self) -> str:
+        """The folder currently chosen on the home screen (may be empty)."""
+        return self._folder_path
+
     def _count_files(self, folder: str) -> int:
         count = 0
         for dirpath, dirnames, filenames in os.walk(folder):
