@@ -313,11 +313,14 @@ def _compute_head_pose_frontal(matrix) -> float:
         return 0.0
 
 
-def detect_faces(filepath: str) -> tuple[int, float, str, float]:
+def detect_faces(filepath: str, rgb=None) -> tuple[int, float, str, float]:
     """Detect faces using multi-scale short-range detection.
 
     Runs detection at all scales, merges overlapping detections, and
     computes a subject isolation score based on face size distribution.
+
+    Pass a pre-decoded RGB array as ``rgb`` to reuse a decode the caller
+    already did (PERF-03); otherwise the image is read from ``filepath``.
 
     Returns:
         (face_count, face_area_ratio, face_distance, subject_isolation)
@@ -329,16 +332,19 @@ def detect_faces(filepath: str) -> tuple[int, float, str, float]:
                           0.0 when no faces found.
     """
     try:
-        img = read_image(filepath)
-        if img is None:
-            log.warning("Cannot read image for face detection: %s", filepath)
-            return 0, 0.0, "none", 0.0
+        if rgb is None:
+            img = read_image(filepath)
+            if img is None:
+                log.warning("Cannot read image for face detection: %s", filepath)
+                return 0, 0.0, "none", 0.0
+            if img.shape[0] == 0 or img.shape[1] == 0:
+                return 0, 0.0, "none", 0.0
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        h, w = img.shape[:2]
+        h, w = rgb.shape[:2]
         if h == 0 or w == 0:
             return 0, 0.0, "none", 0.0
 
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         image_area = float(h * w)
         detector = _get_detector()
 
@@ -550,12 +556,15 @@ def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float, float, float]
     )
 
 
-def analyze_expressions(filepath: str) -> tuple[float, float, float, float]:
+def analyze_expressions(filepath: str, rgb=None) -> tuple[float, float, float, float]:
     """Analyze face expressions and head pose.
 
     Tries the full image first. If the landmarker can't find faces
     (common with distant/small faces), crops and upscales each detected
     face region and retries.
+
+    Pass a pre-decoded RGB array as ``rgb`` to reuse the caller's decode
+    (PERF-03); otherwise the image is read from ``filepath``.
 
     Returns:
         (eyes_open, smile, expression_naturalness, head_pose_frontal)
@@ -565,11 +574,11 @@ def analyze_expressions(filepath: str) -> tuple[float, float, float, float]:
     try:
         import mediapipe as mp
 
-        img = read_image(filepath)
-        if img is None:
-            return 0.0, 0.0, 0.0, 0.0
-
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if rgb is None:
+            img = read_image(filepath)
+            if img is None:
+                return 0.0, 0.0, 0.0, 0.0
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         landmarker = _get_landmarker()
@@ -596,6 +605,9 @@ def analyze_photo(filepath: str) -> dict:
     thread-safe (each thread uses its own detector/landmarker), so it can
     run in a ThreadPoolExecutor. Expression analysis is skipped when no
     face is found, sparing the expensive landmarker on scenery shots.
+
+    Decodes the image once here and reuses the RGB array for both detection
+    and expression analysis (PERF-03) instead of decoding it twice.
     """
     result = {
         "face_count": 0,
@@ -607,13 +619,18 @@ def analyze_photo(filepath: str) -> dict:
         "expression_naturalness": 0.0,
         "head_pose_frontal": 0.0,
     }
-    face_count, area, dist, isolation = detect_faces(filepath)
+    img = read_image(filepath)
+    if img is None or img.shape[0] == 0 or img.shape[1] == 0:
+        return result
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    face_count, area, dist, isolation = detect_faces(filepath, rgb=rgb)
     result["face_count"] = face_count
     result["face_area_ratio"] = area
     result["face_distance"] = dist
     result["subject_isolation"] = isolation
     if face_count > 0:
-        eyes, smile, natural, frontal = analyze_expressions(filepath)
+        eyes, smile, natural, frontal = analyze_expressions(filepath, rgb=rgb)
         result["eyes_open"] = eyes
         result["smile"] = smile
         result["expression_naturalness"] = natural
