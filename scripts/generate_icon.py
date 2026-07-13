@@ -207,24 +207,22 @@ def main():
     # Render at high resolution
     hires = draw_icon_hires()
 
-    # Generate each ICO size by downscaling with high-quality resampling
-    images = []
-    for s in ICO_SIZES:
-        resized = hires.resize((s, s), Image.LANCZOS)
-        images.append(resized)
+    # Save from the LARGEST size as the base so Pillow embeds every requested
+    # resolution. Saving from the smallest (16px) made Pillow drop all larger
+    # sizes, leaving a 16px-only icon that Windows upscaled (blurry shortcuts).
+    base = hires.resize((max(ICO_SIZES), max(ICO_SIZES)), Image.LANCZOS)
 
     ico_path = os.path.join(out_dir, "photobrain.ico")
-    images[0].save(
+    base.save(
         ico_path,
         format="ICO",
         sizes=[(s, s) for s in ICO_SIZES],
-        append_images=images[1:],
     )
     print(f"Icon saved to {ico_path}")
 
     # Save 256px PNG for reference
     png_path = os.path.join(out_dir, "photobrain_256.png")
-    images[-1].save(png_path)
+    base.save(png_path)
     print(f"PNG saved to {png_path}")
 
 
