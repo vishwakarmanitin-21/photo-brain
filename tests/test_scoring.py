@@ -161,5 +161,47 @@ class SingletonSuggestionTests(unittest.TestCase):
         self.assertEqual(Verdict.DELETE, photo.verdict)
 
 
+class MultiPhotoSuggestionTests(unittest.TestCase):
+    """TEST-01: multi-photo clusters keep the top N by score, archive the
+    rest, deterministically, and never overwrite a user's decision."""
+
+    @staticmethod
+    def _photo(pid, score):
+        return Photo(id=pid, filepath=f"C:/x/{pid}.jpg", filename=f"{pid}.jpg",
+                     file_size=10, quality_score=score, verdict=Verdict.REVIEW)
+
+    def test_top_n_kept_rest_archived(self):
+        photos = [self._photo("a", 0.9), self._photo("b", 0.5),
+                  self._photo("c", 0.7), self._photo("d", 0.2)]
+        suggest_verdicts(photos, keep_count=2)
+        by_id = {p.id: p.verdict for p in photos}
+        # Highest two (a=0.9, c=0.7) kept; others archived.
+        self.assertEqual(Verdict.KEEP, by_id["a"])
+        self.assertEqual(Verdict.KEEP, by_id["c"])
+        self.assertEqual(Verdict.ARCHIVE, by_id["b"])
+        self.assertEqual(Verdict.ARCHIVE, by_id["d"])
+
+    def test_ties_break_by_filepath_deterministically(self):
+        # Equal scores → the lexicographically smaller filepath is kept first.
+        photos = [self._photo("b", 0.5), self._photo("a", 0.5)]
+        suggest_verdicts(photos, keep_count=1)
+        by_id = {p.id: p.verdict for p in photos}
+        self.assertEqual(Verdict.KEEP, by_id["a"])
+        self.assertEqual(Verdict.ARCHIVE, by_id["b"])
+
+    def test_user_override_not_counted_against_keep_budget(self):
+        # b is a manual KEEP; it must stay KEEP and not consume a slot that
+        # would otherwise change the auto-picks.
+        photos = [self._photo("a", 0.9), self._photo("b", 0.1),
+                  self._photo("c", 0.8)]
+        photos[1].verdict = Verdict.KEEP
+        photos[1].user_override = True
+        suggest_verdicts(photos, keep_count=2)
+        by_id = {p.id: p.verdict for p in photos}
+        self.assertEqual(Verdict.KEEP, by_id["b"])   # override preserved
+        self.assertEqual(Verdict.KEEP, by_id["a"])   # top score kept
+        self.assertEqual(Verdict.KEEP, by_id["c"])   # second score kept
+
+
 if __name__ == "__main__":
     unittest.main()
