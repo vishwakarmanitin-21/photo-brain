@@ -123,7 +123,15 @@ Each thumbnail shows its decision as a coloured border **and** a corner letter b
 
 **Tooltips:** Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, isolation %, expression naturalness %, and head pose frontal %.
 
-**Filters:** Filter by face distance, low-quality photos (every flagged junk shot across all groups), or events; hide single-photo auto-keeps; search by filename; and sort each group by quality, date, or size. An "N of M groups reviewed" indicator tracks progress, and **Export CSV** saves the full decision list before you apply.
+**Filters:** Filter by face distance, low-quality photos (every flagged junk shot across all groups), **expression** (smiling / eyes-open / blinking / looking-away — for sorting people photos by what makes them good), **duplicate type** (exact / near / unique), or events; hide single-photo auto-keeps; search by filename. An "N of M groups reviewed" indicator tracks progress, and **Export CSV** saves the full decision list before you apply.
+
+**Sort:** by quality (best first), date, size, or — for people photos — **most smiling / eyes-open / most natural / facing camera**.
+
+**View — Groups vs All photos (ranked):** switch from reviewing one similar/duplicate group at a time to the whole batch laid out in a single quality order. In the all-photos view the three **"…All Shown"** buttons act on the entire filtered set — so *Low Quality* + *Delete All Shown* sweeps every flagged junk photo in one pass (reversible, undoable, count-confirmed). A near-black or blown-out photo you can't even see is scored as the junk it is and is left **flagged (undecided)** — never silently kept, never moved on its own.
+
+**Duplicates:** the **Resolve Exact Dups** button keeps the best copy of every byte-identical group and archives the rest across the whole batch in one click.
+
+**Best-of shortlist (O2):** **Keep Best/Event** marks the single best photo from each event as KEEP, and **Export Keepers…** copies every KEEP photo into a folder you choose — your originals stay exactly where they are.
 
 ### 4. Apply
 
