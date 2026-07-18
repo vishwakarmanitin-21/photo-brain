@@ -441,8 +441,10 @@ def _worst_leaning(values: list[float], weight: float = 0.7) -> float:
 def _extract_blendshape_scores(face_blendshapes, facial_transformation_matrixes=None) -> tuple[float, float, float, float]:
     """Extract aggregate expression scores and head pose from blendshapes.
 
-    Eyes-open is aggregated toward the worst face (a blink should hurt a
-    group shot); smile, naturalness and pose are averaged.
+    Every signal (eyes-open, smile, naturalness, pose) is aggregated toward
+    the worst face, so in a group shot one blink / frown / turn-away drags the
+    score down instead of being averaged away. Single-face photos are
+    unaffected (worst == mean for one value).
 
     Returns:
         (eyes_open, smile, expression_naturalness, head_pose_frontal)
@@ -473,11 +475,15 @@ def _extract_blendshape_scores(face_blendshapes, facial_transformation_matrixes=
                 _compute_head_pose_frontal(facial_transformation_matrixes[i])
             )
 
+    # All four signals lean to the WORST face (O5): in a group shot one person
+    # frowning, blinking, or turned away should drag the score down, not be
+    # averaged into invisibility. Single-face photos are unaffected (worst==mean
+    # for one value).
     return (
         round(_worst_leaning(eyes_values), 4),
-        round(_mean(smile_values), 4),
-        round(_mean(naturalness_values), 4),
-        round(_mean(frontal_values), 4) if facial_transformation_matrixes else 0.0,
+        round(_worst_leaning(smile_values), 4),
+        round(_worst_leaning(naturalness_values), 4),
+        round(_worst_leaning(frontal_values), 4) if facial_transformation_matrixes else 0.0,
     )
 
 
@@ -546,13 +552,14 @@ def _analyze_cropped_faces(rgb, landmarker) -> tuple[float, float, float, float]
     if not all_eyes:
         return 0.0, 0.0, 0.0, 0.0
 
-    # Each crop is one face, so aggregate across crops the same way as
-    # across faces in a single result: eyes lean to the worst face.
+    # Each crop is one face, so aggregate across crops the same way as across
+    # faces in a single result: every signal leans to the worst face (O5), so
+    # a group shot with one bad face is honestly penalized.
     return (
         round(_worst_leaning(all_eyes), 4),
-        round(_mean(all_smile), 4),
-        round(_mean(all_naturalness), 4),
-        round(_mean(all_frontal), 4),
+        round(_worst_leaning(all_smile), 4),
+        round(_worst_leaning(all_naturalness), 4),
+        round(_worst_leaning(all_frontal), 4),
     )
 
 

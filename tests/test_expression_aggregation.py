@@ -14,16 +14,18 @@ class _Shape:
         self.score = score
 
 
-def _face(eyes_open: float) -> list:
-    """Build a 46-entry blendshape list for one face at a given eyes-open.
+def _face(eyes_open: float, smile: float = 0.0) -> list:
+    """Build a 46-entry blendshape list for one face.
 
-    Index 9/10 are blink left/right (blink = 1 - eyes_open); all other
-    expression indices are left at 0 (neutral, natural).
+    Index 9/10 are blink left/right (blink = 1 - eyes_open); index 44/45 are
+    smile left/right; all other expression indices are left at 0 (neutral).
     """
     shapes = [_Shape(0.0) for _ in range(46)]
     blink = 1.0 - eyes_open
     shapes[9] = _Shape(blink)
     shapes[10] = _Shape(blink)
+    shapes[44] = _Shape(smile)
+    shapes[45] = _Shape(smile)
     return shapes
 
 
@@ -55,6 +57,19 @@ class WorstLeaningTests(unittest.TestCase):
     def test_single_face_is_unchanged(self):
         eyes, *_ = _extract_blendshape_scores([_face(0.85)])
         self.assertAlmostEqual(0.85, eyes, places=4)
+
+    def test_one_frown_in_a_group_drags_smile_down(self):
+        # O5: smile now leans to the worst face too — four big smiles and one
+        # flat face must score well below the plain average.
+        faces = [_face(1.0, smile=1.0)] * 4 + [_face(1.0, smile=0.0)]
+        _eyes, smile, _nat, _frontal = _extract_blendshape_scores(faces)
+        plain_mean = 4.0 / 5.0
+        self.assertLess(smile, plain_mean - 0.15)
+        self.assertGreater(smile, 0.0)
+
+    def test_single_face_smile_is_unchanged(self):
+        _eyes, smile, *_ = _extract_blendshape_scores([_face(1.0, smile=0.7)])
+        self.assertAlmostEqual(0.7, smile, places=4)
 
 
 if __name__ == "__main__":

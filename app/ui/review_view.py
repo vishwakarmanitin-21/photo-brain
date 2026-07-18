@@ -77,13 +77,65 @@ EVENT_FILTER_ALL = "All Events"
 QUALITY_FILTER_ALL = "All Quality"
 QUALITY_FILTER_LOW = "Low Quality"
 
+# Expression filter (O5): isolate people photos by what makes them good/bad.
+# All predicates require at least one detected face.
+EXPR_FILTER_ALL = "All Expressions"
+EXPR_FILTER_SMILING = "Smiling"
+EXPR_FILTER_EYES_OPEN = "Eyes open"
+EXPR_FILTER_BLINKING = "Blinking / eyes shut"
+EXPR_FILTER_LOOKING_AWAY = "Looking away"
+EXPR_FILTER_OPTIONS = [
+    EXPR_FILTER_ALL, EXPR_FILTER_SMILING, EXPR_FILTER_EYES_OPEN,
+    EXPR_FILTER_BLINKING, EXPR_FILTER_LOOKING_AWAY,
+]
+# Heuristic thresholds on the stored [0,1] per-face signals.
+EXPR_SMILE_MIN = 0.5      # smiling if smile_score >= this
+EXPR_EYES_OPEN_MIN = 0.6  # eyes clearly open at/above this
+EXPR_EYES_SHUT_MAX = 0.5  # blinking/eyes-shut below this
+EXPR_FRONTAL_MIN = 0.4    # looking away when head_pose_frontal below this
+
+
+def photo_matches_expression(photo, expr_filter: str) -> bool:
+    """True if a photo matches an expression filter. Only photos with a face
+    can match a people-expression predicate (a landscape never 'smiles')."""
+    if expr_filter == EXPR_FILTER_ALL:
+        return True
+    if photo.face_count <= 0:
+        return False
+    if expr_filter == EXPR_FILTER_SMILING:
+        return (photo.smile_score or 0.0) >= EXPR_SMILE_MIN
+    if expr_filter == EXPR_FILTER_EYES_OPEN:
+        return (photo.eyes_open_score or 0.0) >= EXPR_EYES_OPEN_MIN
+    if expr_filter == EXPR_FILTER_BLINKING:
+        return (photo.eyes_open_score or 0.0) < EXPR_EYES_SHUT_MAX
+    if expr_filter == EXPR_FILTER_LOOKING_AWAY:
+        return (photo.head_pose_frontal or 0.0) < EXPR_FRONTAL_MIN
+    return True
+
 # Sort options for the photo grid (FEAT-05). Each maps to a (key, reverse) pair.
 SORT_BEST = "Best first"
 SORT_NEWEST = "Newest first"
 SORT_OLDEST = "Oldest first"
 SORT_LARGEST = "Largest first"
 SORT_SMALLEST = "Smallest first"
-SORT_OPTIONS = [SORT_BEST, SORT_NEWEST, SORT_OLDEST, SORT_LARGEST, SORT_SMALLEST]
+# People-photo likability sorts (O5): order by the trait that makes a shot of
+# people good. Photos with no faces score 0 on these and sink to the bottom.
+SORT_SMILING = "Most smiling"
+SORT_EYES_OPEN = "Eyes open"
+SORT_NATURAL = "Most natural"
+SORT_FRONTAL = "Facing camera"
+SORT_OPTIONS = [
+    SORT_BEST, SORT_NEWEST, SORT_OLDEST, SORT_LARGEST, SORT_SMALLEST,
+    SORT_SMILING, SORT_EYES_OPEN, SORT_NATURAL, SORT_FRONTAL,
+]
+
+# Trait each people-sort ranks on (highest first).
+_PEOPLE_SORT_TRAIT = {
+    SORT_SMILING: "smile_score",
+    SORT_EYES_OPEN: "eyes_open_score",
+    SORT_NATURAL: "expression_naturalness",
+    SORT_FRONTAL: "head_pose_frontal",
+}
 
 # View scope (O1): review one duplicate group at a time, or the whole batch
 # laid out in a single quality order.
@@ -112,6 +164,18 @@ def sort_photos(photos: list, mode: str) -> list:
         return sorted(photos, key=lambda p: (-(p.file_size or 0), p.filepath))
     if mode == SORT_SMALLEST:
         return sorted(photos, key=lambda p: (p.file_size or 0, p.filepath))
+    trait = _PEOPLE_SORT_TRAIT.get(mode)
+    if trait:
+        # People photos ranked by the chosen trait; no-face photos (trait 0)
+        # fall to the bottom. Quality then filepath break ties.
+        return sorted(
+            photos,
+            key=lambda p: (
+                -(getattr(p, trait, 0.0) or 0.0),
+                -(p.quality_score or 0.0),
+                p.filepath,
+            ),
+        )
     # SORT_BEST (default): highest quality first.
     return sorted(photos, key=lambda p: (-(p.quality_score or 0), p.filepath))
 
@@ -323,6 +387,28 @@ class ThumbnailWidget(QFrame):
             tooltip_parts.append(f"Date: {self.photo.exif_datetime[:19]}")
         info_label.setToolTip("\n".join(tooltip_parts))
         layout.addWidget(info_label)
+
+        # People-photo likability cue (O5): eyes/smile at a glance plus a
+        # blink / look-away warning, so the good-vs-bad axis for a shot of
+        # people is visible on the card without hovering. Display only — reads
+        # already-stored fields, computes nothing.
+        if self.photo.face_count > 0:
+            eyes_pct = round((self.photo.eyes_open_score or 0.0) * 100)
+            smile_pct = round((self.photo.smile_score or 0.0) * 100)
+            warn = []
+            if (self.photo.eyes_open_score or 0.0) < EXPR_EYES_SHUT_MAX:
+                warn.append("blink")
+            if (self.photo.head_pose_frontal or 0.0) < EXPR_FRONTAL_MIN:
+                warn.append("look-away")
+            cue_text = f"eyes {eyes_pct}% · smile {smile_pct}%"
+            cue_color = "#8a8a8a"
+            if warn:
+                cue_text += "  ·  " + " / ".join(warn)
+                cue_color = COLOR_DELETE  # this face has a problem worth seeing
+            cue_label = QLabel(cue_text)
+            cue_label.setStyleSheet(f"font-size: 9px; color: {cue_color};")
+            cue_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(cue_label)
 
         # Keep / Archive / Delete buttons row
         btn_row = QHBoxLayout()
@@ -642,6 +728,21 @@ class ReviewView(QWidget):
         self._face_filter.currentTextChanged.connect(self._apply_filters)
         self._face_filter.setMinimumWidth(140)
         filter_bar.addWidget(self._face_filter)
+
+        filter_bar.addSpacing(15)
+
+        # Expression filter (O5) — sort/segregate people photos by likability.
+        filter_bar.addWidget(QLabel("Expression:"))
+        self._expr_filter = QComboBox()
+        self._expr_filter.addItems(EXPR_FILTER_OPTIONS)
+        self._expr_filter.setToolTip(
+            "Isolate people photos by expression: everyone smiling / eyes "
+            "open, or quarantine blinks and turn-aways. Only photos with a "
+            "detected face match."
+        )
+        self._expr_filter.currentTextChanged.connect(self._apply_filters)
+        self._expr_filter.setMinimumWidth(150)
+        filter_bar.addWidget(self._expr_filter)
 
         filter_bar.addSpacing(15)
 
@@ -1172,6 +1273,11 @@ class ReviewView(QWidget):
         self._quality_filter.setCurrentIndex(0)
         self._quality_filter.blockSignals(False)
 
+        # Reset expression filter
+        self._expr_filter.blockSignals(True)
+        self._expr_filter.setCurrentIndex(0)
+        self._expr_filter.blockSignals(False)
+
         self._apply_filters()
 
     @Slot(str, str)
@@ -1222,6 +1328,8 @@ class ReviewView(QWidget):
         return {
             "face": self._face_filter.currentText(),
             "quality": self._quality_filter.currentText(),
+            "expr": self._expr_filter.currentText(),
+            "view": self._view_combo.currentText(),
             "event_idx": self._event_filter.currentIndex(),
             "hide_singletons": self._hide_singletons.isChecked(),
             "search": self._search_box.text(),
@@ -1236,12 +1344,15 @@ class ReviewView(QWidget):
         for widget, setter, value in (
             (self._face_filter, self._face_filter.setCurrentText, state.get("face")),
             (self._quality_filter, self._quality_filter.setCurrentText, state.get("quality")),
+            (self._expr_filter, self._expr_filter.setCurrentText, state.get("expr")),
+            (self._view_combo, self._view_combo.setCurrentText, state.get("view")),
             (self._hide_singletons, self._hide_singletons.setChecked, state.get("hide_singletons")),
         ):
             widget.blockSignals(True)
             if value is not None:
                 setter(value)
             widget.blockSignals(False)
+        self._sync_action_labels()
         self._event_filter.blockSignals(True)
         idx = state.get("event_idx", 0)
         if idx is not None and 0 <= idx < self._event_filter.count():
@@ -1315,6 +1426,18 @@ class ReviewView(QWidget):
                 passing_photo_ids &= face_ids
             else:
                 passing_photo_ids = face_ids
+
+        # Expression filter (O5): people photos by likability.
+        expr_filter = self._expr_filter.currentText()
+        if expr_filter != EXPR_FILTER_ALL:
+            expr_ids = {
+                p.id for photos in self._cluster_photos.values() for p in photos
+                if photo_matches_expression(p, expr_filter)
+            }
+            passing_photo_ids = (
+                expr_ids if passing_photo_ids is None
+                else passing_photo_ids & expr_ids
+            )
 
         # Filename search (FEAT-05).
         query = self._search_box.text().strip().lower()
@@ -1395,6 +1518,7 @@ class ReviewView(QWidget):
         filters_active = (
             self._face_filter.currentText() != FACE_FILTER_ALL
             or self._quality_filter.currentText() != QUALITY_FILTER_ALL
+            or self._expr_filter.currentText() != EXPR_FILTER_ALL
             or self._event_filter.currentIndex() > 0
         )
         if filters_active:
