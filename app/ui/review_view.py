@@ -64,6 +64,30 @@ VERDICT_BADGE_LETTER = {
     Verdict.REVIEW: "?",
 }
 
+# Prominent verdict chip text — the at-a-glance decision label on each card.
+VERDICT_PILL_TEXT = {
+    Verdict.KEEP: "✓ KEEP",
+    Verdict.ARCHIVE: "ARCHIVE",
+    Verdict.DELETE: "✕ DELETE",
+    Verdict.REVIEW: "? UNDECIDED",
+}
+
+# Faint whole-card wash so a card reads as its decision colour at a glance.
+# Low-alpha over palette(base), so it works in both light and dark themes.
+VERDICT_TINT = {
+    Verdict.KEEP: "rgba(76,175,80,0.16)",
+    Verdict.ARCHIVE: "rgba(255,152,0,0.16)",
+    Verdict.DELETE: "rgba(244,67,54,0.18)",
+    Verdict.REVIEW: "palette(base)",
+}
+
+VERDICT_COLOR = {
+    Verdict.KEEP: COLOR_KEEP,
+    Verdict.ARCHIVE: COLOR_ARCHIVE,
+    Verdict.DELETE: COLOR_DELETE,
+    Verdict.REVIEW: COLOR_REVIEW,
+}
+
 # Filter constants
 FACE_FILTER_ALL = "All Photos"
 FACE_FILTER_CLOSE = "Faces (Close-up)"
@@ -482,7 +506,7 @@ class ThumbnailWidget(QFrame):
         # without relying on border colour alone (colour-blind safe). (UX-12)
         self._verdict_badge = QLabel(self)
         self._verdict_badge.setAlignment(Qt.AlignCenter)
-        self._verdict_badge.setFixedSize(22, 22)
+        self._verdict_badge.setFixedSize(26, 26)
         self._verdict_badge.move(10, 10)
         self._verdict_badge.raise_()
 
@@ -536,42 +560,76 @@ class ThumbnailWidget(QFrame):
 
     def update_verdict(self, verdict: Verdict):
         self.photo.verdict = verdict
-        self._verdict_label.setText(verdict.value)
         self._update_style()
+
+    def _style_action_button(self, btn, color: str, active: bool):
+        """The active verdict button is filled and ringed; the others are quiet
+        outlines — so the row both shows the current decision and lets you
+        change it in one click."""
+        if active:
+            btn.setStyleSheet(
+                f"QPushButton {{ font-size: 9px; padding: 2px 6px; "
+                f"background-color: {color}; color: white; font-weight: bold; "
+                f"border: 2px solid #ffffff; border-radius: 3px; }}"
+            )
+        else:
+            btn.setStyleSheet(
+                f"QPushButton {{ font-size: 9px; padding: 2px 6px; "
+                f"background-color: transparent; color: {color}; "
+                f"border: 1px solid {color}; border-radius: 3px; }}"
+                f"QPushButton:hover {{ background-color: {color}; color: white; }}"
+            )
 
     def _update_style(self):
         verdict = self.photo.verdict
-        if verdict == Verdict.KEEP:
-            border_color = COLOR_KEEP
-        elif verdict == Verdict.ARCHIVE:
-            border_color = COLOR_ARCHIVE
-        elif verdict == Verdict.DELETE:
-            border_color = COLOR_DELETE
+        color = VERDICT_COLOR.get(verdict, COLOR_REVIEW)
+        tint = VERDICT_TINT.get(verdict, "palette(base)")
+        decided = verdict != Verdict.REVIEW
+
+        # Card frame: a thick solid colour when decided; a dashed grey frame
+        # while still undecided, so "needs a decision" reads differently from
+        # "handled". Selection wins with a blue frame.
+        if self._selected:
+            border = f"3px solid {COLOR_SELECTED}"
+        elif decided:
+            border = f"5px solid {color}"
         else:
-            border_color = COLOR_REVIEW
-
-        border_width = 4 if self._selected else 3
-        outline = f"outline: 2px solid {COLOR_SELECTED};" if self._selected else ""
-
+            border = f"3px dashed {COLOR_REVIEW}"
         self.setStyleSheet(
-            f"ThumbnailWidget {{ border: {border_width}px solid {border_color}; "
-            f"border-radius: 4px; background-color: palette(base); {outline} }}"
+            f"ThumbnailWidget {{ border: {border}; border-radius: 6px; "
+            f"background-color: {tint}; }}"
         )
 
-        # Verdict label color
-        self._verdict_label.setStyleSheet(
-            f"font-size: 10px; font-weight: bold; color: {border_color};"
-        )
+        # Big verdict chip: solid colour when decided (pops), hollow outline
+        # when undecided (recedes but flags "you haven't decided").
+        self._verdict_label.setText(VERDICT_PILL_TEXT.get(verdict, verdict.value))
+        if decided:
+            self._verdict_label.setStyleSheet(
+                f"QLabel {{ background-color: {color}; color: white; "
+                f"font-size: 12px; font-weight: bold; padding: 3px 10px; "
+                f"border-radius: 9px; }}"
+            )
+        else:
+            self._verdict_label.setStyleSheet(
+                f"QLabel {{ background-color: transparent; color: {COLOR_REVIEW}; "
+                f"font-size: 12px; font-weight: bold; padding: 2px 9px; "
+                f"border: 2px dashed {COLOR_REVIEW}; border-radius: 9px; }}"
+            )
 
-        # Corner letter badge — colour-independent verdict cue (UX-12).
+        # Corner letter badge — colour-independent verdict cue (UX-12), enlarged.
         letter = VERDICT_BADGE_LETTER.get(verdict, "?")
         self._verdict_badge.setText(letter)
         self._verdict_badge.setToolTip(verdict.value)
         self._verdict_badge.setStyleSheet(
-            f"QLabel {{ background-color: {border_color}; color: white; "
-            f"font-size: 12px; font-weight: bold; border: 1px solid white; "
-            f"border-radius: 11px; }}"
+            f"QLabel {{ background-color: {color}; color: white; "
+            f"font-size: 13px; font-weight: bold; border: 2px solid white; "
+            f"border-radius: 13px; }}"
         )
+
+        # Action buttons double as a live state display.
+        self._style_action_button(self._keep_btn, COLOR_KEEP, verdict == Verdict.KEEP)
+        self._style_action_button(self._archive_btn, COLOR_ARCHIVE, verdict == Verdict.ARCHIVE)
+        self._style_action_button(self._delete_btn, COLOR_DELETE, verdict == Verdict.DELETE)
 
     def mousePressEvent(self, event):
         self.clicked.emit(self.photo.id)
@@ -729,9 +787,13 @@ class ReviewView(QWidget):
         toolbar.addSpacing(10)
 
         self._apply_btn = QPushButton("Apply Changes")
+        self._apply_btn.setToolTip(
+            "Move/keep/delete every decided photo. Shows a summary first — "
+            "nothing happens until you confirm.")
         self._apply_btn.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
-            "font-size: 13px; padding: 6px 16px; border-radius: 4px; }"
+            "font-size: 13px; font-weight: bold; padding: 6px 16px; "
+            "border-radius: 4px; }"
             "QPushButton:hover { background-color: #45a049; }"
         )
         self._apply_btn.clicked.connect(self.apply_requested.emit)
@@ -2151,6 +2213,11 @@ class ReviewView(QWidget):
         self._archive_label.setText(f"{archive} ARCHIVE")
         self._delete_label.setText(f"{delete} DELETE")
         self._review_label.setText(f"{review} REVIEW")
+        # Live count of captured, actionable decisions on the Apply button, so
+        # the user sees exactly how much is pending before committing.
+        actionable = keep + archive + delete
+        self._apply_btn.setText(
+            f"Apply Changes ({actionable})" if actionable else "Apply Changes")
         self._update_review_progress()
 
     def _update_review_progress(self):
