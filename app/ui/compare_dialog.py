@@ -71,6 +71,20 @@ class _PhotoPanel(QFrame):
         info.setAlignment(Qt.AlignCenter)
         layout.addWidget(info)
 
+        # People-photo likability signals — Compare is where you pick between
+        # two shots of the same moment, so surface the eyes/smile/facing data
+        # that decides which is the keeper.
+        if photo.face_count:
+            people = QLabel(
+                f"eyes {round(photo.eyes_open_score * 100)}%  ·  "
+                f"smile {round(photo.smile_score * 100)}%  ·  "
+                f"natural {round(photo.expression_naturalness * 100)}%  ·  "
+                f"facing {round(photo.head_pose_frontal * 100)}%"
+            )
+            people.setStyleSheet("font-size: 11px; color: #8a8a8a;")
+            people.setAlignment(Qt.AlignCenter)
+            layout.addWidget(people)
+
         btn_row = QHBoxLayout()
         for label, verdict in [("Keep", Verdict.KEEP),
                                ("Archive", Verdict.ARCHIVE),

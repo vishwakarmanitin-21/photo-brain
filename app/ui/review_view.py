@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 )
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
-from app.core.scoring import is_low_quality_singleton
+from app.core.scoring import is_low_quality
 from app.ui.dialogs import ShortcutsHelpDialog
 from app.ui.compare_dialog import CompareDialog
 
@@ -64,6 +64,30 @@ VERDICT_BADGE_LETTER = {
     Verdict.REVIEW: "?",
 }
 
+# Prominent verdict chip text — the at-a-glance decision label on each card.
+VERDICT_PILL_TEXT = {
+    Verdict.KEEP: "✓ KEEP",
+    Verdict.ARCHIVE: "ARCHIVE",
+    Verdict.DELETE: "✕ DELETE",
+    Verdict.REVIEW: "? UNDECIDED",
+}
+
+# Faint whole-card wash so a card reads as its decision colour at a glance.
+# Low-alpha over palette(base), so it works in both light and dark themes.
+VERDICT_TINT = {
+    Verdict.KEEP: "rgba(76,175,80,0.16)",
+    Verdict.ARCHIVE: "rgba(255,152,0,0.16)",
+    Verdict.DELETE: "rgba(244,67,54,0.18)",
+    Verdict.REVIEW: "palette(base)",
+}
+
+VERDICT_COLOR = {
+    Verdict.KEEP: COLOR_KEEP,
+    Verdict.ARCHIVE: COLOR_ARCHIVE,
+    Verdict.DELETE: COLOR_DELETE,
+    Verdict.REVIEW: COLOR_REVIEW,
+}
+
 # Filter constants
 FACE_FILTER_ALL = "All Photos"
 FACE_FILTER_CLOSE = "Faces (Close-up)"
@@ -75,7 +99,65 @@ FACE_FILTER_GROUP = "Group Shots (3+)"
 EVENT_FILTER_ALL = "All Events"
 
 QUALITY_FILTER_ALL = "All Quality"
-QUALITY_FILTER_LOW = "Low Quality (no dupes)"
+QUALITY_FILTER_LOW = "Low Quality"
+
+# Expression filter (O5): isolate people photos by what makes them good/bad.
+# All predicates require at least one detected face.
+EXPR_FILTER_ALL = "All Expressions"
+EXPR_FILTER_SMILING = "Smiling"
+EXPR_FILTER_EYES_OPEN = "Eyes open"
+EXPR_FILTER_BLINKING = "Blinking / eyes shut"
+EXPR_FILTER_LOOKING_AWAY = "Looking away"
+EXPR_FILTER_OPTIONS = [
+    EXPR_FILTER_ALL, EXPR_FILTER_SMILING, EXPR_FILTER_EYES_OPEN,
+    EXPR_FILTER_BLINKING, EXPR_FILTER_LOOKING_AWAY,
+]
+# Heuristic thresholds on the stored [0,1] per-face signals.
+EXPR_SMILE_MIN = 0.5      # smiling if smile_score >= this
+EXPR_EYES_OPEN_MIN = 0.6  # eyes clearly open at/above this
+EXPR_EYES_SHUT_MAX = 0.5  # blinking/eyes-shut below this
+EXPR_FRONTAL_MIN = 0.4    # looking away when head_pose_frontal below this
+
+# Duplicate-type filter (O4): isolate exact byte-identical vs near-duplicate
+# vs unique photos. (Multi-photo groups are already isolated by the "Hide
+# single photos" checkbox; this splits them by kind.)
+DUP_FILTER_ALL = "All"
+DUP_FILTER_EXACT = "Exact duplicates"
+DUP_FILTER_NEAR = "Near duplicates"
+DUP_FILTER_UNIQUE = "Not duplicates"
+DUP_FILTER_OPTIONS = [
+    DUP_FILTER_ALL, DUP_FILTER_EXACT, DUP_FILTER_NEAR, DUP_FILTER_UNIQUE,
+]
+
+
+def photo_matches_dup(photo, dup_filter: str) -> bool:
+    if dup_filter == DUP_FILTER_ALL:
+        return True
+    if dup_filter == DUP_FILTER_EXACT:
+        return photo.dup_type == DupType.EXACT
+    if dup_filter == DUP_FILTER_NEAR:
+        return photo.dup_type == DupType.NEAR
+    if dup_filter == DUP_FILTER_UNIQUE:
+        return photo.dup_type == DupType.NONE
+    return True
+
+
+def photo_matches_expression(photo, expr_filter: str) -> bool:
+    """True if a photo matches an expression filter. Only photos with a face
+    can match a people-expression predicate (a landscape never 'smiles')."""
+    if expr_filter == EXPR_FILTER_ALL:
+        return True
+    if photo.face_count <= 0:
+        return False
+    if expr_filter == EXPR_FILTER_SMILING:
+        return (photo.smile_score or 0.0) >= EXPR_SMILE_MIN
+    if expr_filter == EXPR_FILTER_EYES_OPEN:
+        return (photo.eyes_open_score or 0.0) >= EXPR_EYES_OPEN_MIN
+    if expr_filter == EXPR_FILTER_BLINKING:
+        return (photo.eyes_open_score or 0.0) < EXPR_EYES_SHUT_MAX
+    if expr_filter == EXPR_FILTER_LOOKING_AWAY:
+        return (photo.head_pose_frontal or 0.0) < EXPR_FRONTAL_MIN
+    return True
 
 # Sort options for the photo grid (FEAT-05). Each maps to a (key, reverse) pair.
 SORT_BEST = "Best first"
@@ -83,7 +165,36 @@ SORT_NEWEST = "Newest first"
 SORT_OLDEST = "Oldest first"
 SORT_LARGEST = "Largest first"
 SORT_SMALLEST = "Smallest first"
-SORT_OPTIONS = [SORT_BEST, SORT_NEWEST, SORT_OLDEST, SORT_LARGEST, SORT_SMALLEST]
+# People-photo likability sorts (O5): order by the trait that makes a shot of
+# people good. Photos with no faces score 0 on these and sink to the bottom.
+SORT_SMILING = "Most smiling"
+SORT_EYES_OPEN = "Eyes open"
+SORT_NATURAL = "Most natural"
+SORT_FRONTAL = "Facing camera"
+SORT_OPTIONS = [
+    SORT_BEST, SORT_NEWEST, SORT_OLDEST, SORT_LARGEST, SORT_SMALLEST,
+    SORT_SMILING, SORT_EYES_OPEN, SORT_NATURAL, SORT_FRONTAL,
+]
+
+# Trait each people-sort ranks on (highest first).
+_PEOPLE_SORT_TRAIT = {
+    SORT_SMILING: "smile_score",
+    SORT_EYES_OPEN: "eyes_open_score",
+    SORT_NATURAL: "expression_naturalness",
+    SORT_FRONTAL: "head_pose_frontal",
+}
+
+# View scope (O1): review one duplicate group at a time, or the whole batch
+# laid out in a single quality order.
+VIEW_GROUPS = "Groups"
+VIEW_ALL = "All photos (ranked)"
+VIEW_OPTIONS = [VIEW_GROUPS, VIEW_ALL]
+
+# Safety cap: the flat all-photos grid renders at most this many widgets at
+# once (real batches are a few hundred photos; this only bites pathological
+# libraries). When it bites, the lowest-quality tail is what's dropped from
+# the grid — it is still counted and still swept by batch actions.
+MAX_FLAT_GRID = 600
 
 
 def sort_photos(photos: list, mode: str) -> list:
@@ -100,6 +211,18 @@ def sort_photos(photos: list, mode: str) -> list:
         return sorted(photos, key=lambda p: (-(p.file_size or 0), p.filepath))
     if mode == SORT_SMALLEST:
         return sorted(photos, key=lambda p: (p.file_size or 0, p.filepath))
+    trait = _PEOPLE_SORT_TRAIT.get(mode)
+    if trait:
+        # People photos ranked by the chosen trait; no-face photos (trait 0)
+        # fall to the bottom. Quality then filepath break ties.
+        return sorted(
+            photos,
+            key=lambda p: (
+                -(getattr(p, trait, 0.0) or 0.0),
+                -(p.quality_score or 0.0),
+                p.filepath,
+            ),
+        )
     # SORT_BEST (default): highest quality first.
     return sorted(photos, key=lambda p: (-(p.quality_score or 0), p.filepath))
 
@@ -312,6 +435,28 @@ class ThumbnailWidget(QFrame):
         info_label.setToolTip("\n".join(tooltip_parts))
         layout.addWidget(info_label)
 
+        # People-photo likability cue (O5): eyes/smile at a glance plus a
+        # blink / look-away warning, so the good-vs-bad axis for a shot of
+        # people is visible on the card without hovering. Display only — reads
+        # already-stored fields, computes nothing.
+        if self.photo.face_count > 0:
+            eyes_pct = round((self.photo.eyes_open_score or 0.0) * 100)
+            smile_pct = round((self.photo.smile_score or 0.0) * 100)
+            warn = []
+            if (self.photo.eyes_open_score or 0.0) < EXPR_EYES_SHUT_MAX:
+                warn.append("blink")
+            if (self.photo.head_pose_frontal or 0.0) < EXPR_FRONTAL_MIN:
+                warn.append("look-away")
+            cue_text = f"eyes {eyes_pct}% · smile {smile_pct}%"
+            cue_color = "#8a8a8a"
+            if warn:
+                cue_text += "  ·  " + " / ".join(warn)
+                cue_color = COLOR_DELETE  # this face has a problem worth seeing
+            cue_label = QLabel(cue_text)
+            cue_label.setStyleSheet(f"font-size: 9px; color: {cue_color};")
+            cue_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(cue_label)
+
         # Keep / Archive / Delete buttons row
         btn_row = QHBoxLayout()
         btn_row.setSpacing(3)
@@ -361,7 +506,7 @@ class ThumbnailWidget(QFrame):
         # without relying on border colour alone (colour-blind safe). (UX-12)
         self._verdict_badge = QLabel(self)
         self._verdict_badge.setAlignment(Qt.AlignCenter)
-        self._verdict_badge.setFixedSize(22, 22)
+        self._verdict_badge.setFixedSize(26, 26)
         self._verdict_badge.move(10, 10)
         self._verdict_badge.raise_()
 
@@ -415,42 +560,76 @@ class ThumbnailWidget(QFrame):
 
     def update_verdict(self, verdict: Verdict):
         self.photo.verdict = verdict
-        self._verdict_label.setText(verdict.value)
         self._update_style()
+
+    def _style_action_button(self, btn, color: str, active: bool):
+        """The active verdict button is filled and ringed; the others are quiet
+        outlines — so the row both shows the current decision and lets you
+        change it in one click."""
+        if active:
+            btn.setStyleSheet(
+                f"QPushButton {{ font-size: 9px; padding: 2px 6px; "
+                f"background-color: {color}; color: white; font-weight: bold; "
+                f"border: 2px solid #ffffff; border-radius: 3px; }}"
+            )
+        else:
+            btn.setStyleSheet(
+                f"QPushButton {{ font-size: 9px; padding: 2px 6px; "
+                f"background-color: transparent; color: {color}; "
+                f"border: 1px solid {color}; border-radius: 3px; }}"
+                f"QPushButton:hover {{ background-color: {color}; color: white; }}"
+            )
 
     def _update_style(self):
         verdict = self.photo.verdict
-        if verdict == Verdict.KEEP:
-            border_color = COLOR_KEEP
-        elif verdict == Verdict.ARCHIVE:
-            border_color = COLOR_ARCHIVE
-        elif verdict == Verdict.DELETE:
-            border_color = COLOR_DELETE
+        color = VERDICT_COLOR.get(verdict, COLOR_REVIEW)
+        tint = VERDICT_TINT.get(verdict, "palette(base)")
+        decided = verdict != Verdict.REVIEW
+
+        # Card frame: a thick solid colour when decided; a dashed grey frame
+        # while still undecided, so "needs a decision" reads differently from
+        # "handled". Selection wins with a blue frame.
+        if self._selected:
+            border = f"3px solid {COLOR_SELECTED}"
+        elif decided:
+            border = f"5px solid {color}"
         else:
-            border_color = COLOR_REVIEW
-
-        border_width = 4 if self._selected else 3
-        outline = f"outline: 2px solid {COLOR_SELECTED};" if self._selected else ""
-
+            border = f"3px dashed {COLOR_REVIEW}"
         self.setStyleSheet(
-            f"ThumbnailWidget {{ border: {border_width}px solid {border_color}; "
-            f"border-radius: 4px; background-color: palette(base); {outline} }}"
+            f"ThumbnailWidget {{ border: {border}; border-radius: 6px; "
+            f"background-color: {tint}; }}"
         )
 
-        # Verdict label color
-        self._verdict_label.setStyleSheet(
-            f"font-size: 10px; font-weight: bold; color: {border_color};"
-        )
+        # Big verdict chip: solid colour when decided (pops), hollow outline
+        # when undecided (recedes but flags "you haven't decided").
+        self._verdict_label.setText(VERDICT_PILL_TEXT.get(verdict, verdict.value))
+        if decided:
+            self._verdict_label.setStyleSheet(
+                f"QLabel {{ background-color: {color}; color: white; "
+                f"font-size: 12px; font-weight: bold; padding: 3px 10px; "
+                f"border-radius: 9px; }}"
+            )
+        else:
+            self._verdict_label.setStyleSheet(
+                f"QLabel {{ background-color: transparent; color: {COLOR_REVIEW}; "
+                f"font-size: 12px; font-weight: bold; padding: 2px 9px; "
+                f"border: 2px dashed {COLOR_REVIEW}; border-radius: 9px; }}"
+            )
 
-        # Corner letter badge — colour-independent verdict cue (UX-12).
+        # Corner letter badge — colour-independent verdict cue (UX-12), enlarged.
         letter = VERDICT_BADGE_LETTER.get(verdict, "?")
         self._verdict_badge.setText(letter)
         self._verdict_badge.setToolTip(verdict.value)
         self._verdict_badge.setStyleSheet(
-            f"QLabel {{ background-color: {border_color}; color: white; "
-            f"font-size: 12px; font-weight: bold; border: 1px solid white; "
-            f"border-radius: 11px; }}"
+            f"QLabel {{ background-color: {color}; color: white; "
+            f"font-size: 13px; font-weight: bold; border: 2px solid white; "
+            f"border-radius: 13px; }}"
         )
+
+        # Action buttons double as a live state display.
+        self._style_action_button(self._keep_btn, COLOR_KEEP, verdict == Verdict.KEEP)
+        self._style_action_button(self._archive_btn, COLOR_ARCHIVE, verdict == Verdict.ARCHIVE)
+        self._style_action_button(self._delete_btn, COLOR_DELETE, verdict == Verdict.DELETE)
 
     def mousePressEvent(self, event):
         self.clicked.emit(self.photo.id)
@@ -503,6 +682,10 @@ class ReviewView(QWidget):
         self._selected_photo_id: str | None = None   # anchor / primary
         self._selected_ids: set[str] = set()          # full multi-selection
         self._current_photos: list[Photo] = []  # Current cluster photos
+        # Which photo ids pass the active filters (None = no filter). Kept so
+        # the whole-batch view and batch actions share one filtered set.
+        self._passing_photo_ids: set[str] | None = None
+        self._flat_total = 0  # total photos in the flat view before render cap
         # Verdict-level undo: shadow of the last-checkpointed (verdict,
         # user_override) per photo, and a stack of prior states to restore.
         self._verdict_shadow: dict[str, tuple] = {}
@@ -604,9 +787,13 @@ class ReviewView(QWidget):
         toolbar.addSpacing(10)
 
         self._apply_btn = QPushButton("Apply Changes")
+        self._apply_btn.setToolTip(
+            "Move/keep/delete every decided photo. Shows a summary first — "
+            "nothing happens until you confirm.")
         self._apply_btn.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
-            "font-size: 13px; padding: 6px 16px; border-radius: 4px; }"
+            "font-size: 13px; font-weight: bold; padding: 6px 16px; "
+            "border-radius: 4px; }"
             "QPushButton:hover { background-color: #45a049; }"
         )
         self._apply_btn.clicked.connect(self.apply_requested.emit)
@@ -629,16 +816,46 @@ class ReviewView(QWidget):
 
         filter_bar.addSpacing(15)
 
+        # Expression filter (O5) — sort/segregate people photos by likability.
+        filter_bar.addWidget(QLabel("Expression:"))
+        self._expr_filter = QComboBox()
+        self._expr_filter.addItems(EXPR_FILTER_OPTIONS)
+        self._expr_filter.setToolTip(
+            "Isolate people photos by expression: everyone smiling / eyes "
+            "open, or quarantine blinks and turn-aways. Only photos with a "
+            "detected face match."
+        )
+        self._expr_filter.currentTextChanged.connect(self._apply_filters)
+        self._expr_filter.setMinimumWidth(150)
+        filter_bar.addWidget(self._expr_filter)
+
+        filter_bar.addSpacing(15)
+
         filter_bar.addWidget(QLabel("Quality:"))
         self._quality_filter = QComboBox()
         self._quality_filter.addItems([QUALITY_FILTER_ALL, QUALITY_FILTER_LOW])
         self._quality_filter.setToolTip(
-            "Low Quality: standalone photos (no duplicates) that are blurry "
-            "or badly exposed — suggested for archiving."
+            "Low Quality: every photo flagged as junk — blurry, or too dark / "
+            "blown-out to use — across all groups. These are left undecided "
+            "(not kept, not moved) for you to sweep."
         )
         self._quality_filter.currentTextChanged.connect(self._apply_filters)
         self._quality_filter.setMinimumWidth(150)
         filter_bar.addWidget(self._quality_filter)
+
+        filter_bar.addSpacing(15)
+
+        # Duplicate-type filter (O4).
+        filter_bar.addWidget(QLabel("Dups:"))
+        self._dup_filter = QComboBox()
+        self._dup_filter.addItems(DUP_FILTER_OPTIONS)
+        self._dup_filter.setToolTip(
+            "Show only exact (byte-identical) duplicates, near-duplicates, or "
+            "unique photos."
+        )
+        self._dup_filter.currentTextChanged.connect(self._apply_filters)
+        self._dup_filter.setMinimumWidth(140)
+        filter_bar.addWidget(self._dup_filter)
 
         filter_bar.addSpacing(15)
 
@@ -680,6 +897,22 @@ class ReviewView(QWidget):
         self._sort_combo.addItems(SORT_OPTIONS)
         self._sort_combo.currentTextChanged.connect(self._on_sort_changed)
         filter_bar.addWidget(self._sort_combo)
+
+        filter_bar.addSpacing(15)
+
+        # View scope (O1): one group at a time, or the whole batch ranked.
+        filter_bar.addWidget(QLabel("View:"))
+        self._view_combo = QComboBox()
+        self._view_combo.addItems(VIEW_OPTIONS)
+        self._view_combo.setToolTip(
+            "Groups: review one similar/duplicate group at a time.\n"
+            "All photos (ranked): every photo laid out in one quality order "
+            "across the whole batch — combine with a filter and the batch "
+            "buttons to shortlist or purge in one pass."
+        )
+        self._view_combo.currentTextChanged.connect(self._on_view_scope_changed)
+        self._view_combo.setMinimumWidth(150)
+        filter_bar.addWidget(self._view_combo)
 
         filter_bar.addStretch()
 
@@ -726,71 +959,105 @@ class ReviewView(QWidget):
         # ── Action buttons row ──
         actions = QHBoxLayout()
 
-        btn_keep_all = QPushButton("Keep All")
-        btn_keep_all.setToolTip("Mark all photos in this cluster as KEEP")
-        btn_keep_all.setStyleSheet(
+        self._btn_keep_all = QPushButton("Keep All")
+        self._btn_keep_all.setStyleSheet(
             f"QPushButton {{ background-color: {COLOR_KEEP}; color: white; "
             f"padding: 4px 12px; border-radius: 3px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #45a049; }}"
         )
-        btn_keep_all.clicked.connect(self._keep_all)
-        actions.addWidget(btn_keep_all)
+        self._btn_keep_all.clicked.connect(self._keep_all)
+        actions.addWidget(self._btn_keep_all)
 
-        btn_archive_all = QPushButton("Archive All")
-        btn_archive_all.setToolTip("Move all photos in this cluster to archive (safe, reversible)")
-        btn_archive_all.setStyleSheet(
+        self._btn_archive_all = QPushButton("Archive All")
+        self._btn_archive_all.setStyleSheet(
             f"QPushButton {{ background-color: {COLOR_ARCHIVE}; color: white; "
             f"padding: 4px 12px; border-radius: 3px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #F57C00; }}"
         )
-        btn_archive_all.clicked.connect(self._archive_all)
-        actions.addWidget(btn_archive_all)
+        self._btn_archive_all.clicked.connect(self._archive_all)
+        actions.addWidget(self._btn_archive_all)
 
-        btn_delete_all = QPushButton("Delete All")
-        btn_delete_all.setToolTip("Permanently delete all photos in this cluster (sent to Recycle Bin)")
-        btn_delete_all.setStyleSheet(
+        self._btn_delete_all = QPushButton("Delete All")
+        self._btn_delete_all.setStyleSheet(
             f"QPushButton {{ background-color: {COLOR_DELETE}; color: white; "
             f"padding: 4px 12px; border-radius: 3px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #d32f2f; }}"
         )
-        btn_delete_all.clicked.connect(self._delete_all)
-        actions.addWidget(btn_delete_all)
+        self._btn_delete_all.clicked.connect(self._delete_all)
+        actions.addWidget(self._btn_delete_all)
 
         actions.addSpacing(10)
 
-        btn_keep_top1 = QPushButton("Keep Top 1")
-        btn_keep_top1.setToolTip("Keep only the best photo in this cluster")
-        btn_keep_top1.clicked.connect(lambda: self._keep_top_n(1))
-        actions.addWidget(btn_keep_top1)
+        # Global duplicate resolver (O4) — works in either view scope.
+        self._btn_resolve_dups = QPushButton("Resolve Exact Dups")
+        self._btn_resolve_dups.setToolTip(
+            "Across the whole batch: keep the best copy of every exact "
+            "(byte-identical) duplicate group and archive the rest.")
+        self._btn_resolve_dups.clicked.connect(self._resolve_exact_duplicates)
+        actions.addWidget(self._btn_resolve_dups)
 
-        btn_keep_top2 = QPushButton("Keep Top 2")
-        btn_keep_top2.setToolTip("Keep the top 2 photos in this cluster")
-        btn_keep_top2.clicked.connect(lambda: self._keep_top_n(2))
-        actions.addWidget(btn_keep_top2)
+        actions.addSpacing(10)
 
-        btn_delete_rest = QPushButton("Delete Rest")
-        btn_delete_rest.setToolTip("Mark all non-KEEP photos as DELETE")
-        btn_delete_rest.clicked.connect(self._delete_rest)
-        actions.addWidget(btn_delete_rest)
+        # Best-of shortlist + export (O2) — global, work in either view.
+        self._btn_best_per_event = QPushButton("Keep Best/Event")
+        self._btn_best_per_event.setToolTip(
+            "Mark the single best photo from each event as KEEP — a quick "
+            "best-of shortlist across the whole batch.")
+        self._btn_best_per_event.clicked.connect(self._keep_best_per_event)
+        actions.addWidget(self._btn_best_per_event)
 
-        btn_mark_reviewed = QPushButton("Mark Reviewed")
-        btn_mark_reviewed.clicked.connect(self._mark_reviewed)
-        actions.addWidget(btn_mark_reviewed)
+        self._btn_export_keepers = QPushButton("Export Keepers…")
+        self._btn_export_keepers.setToolTip(
+            "Copy every KEEP photo into a folder you choose. Originals stay "
+            "exactly where they are.")
+        self._btn_export_keepers.clicked.connect(self._export_keepers)
+        actions.addWidget(self._btn_export_keepers)
+
+        actions.addSpacing(10)
+
+        self._btn_keep_top1 = QPushButton("Keep Top 1")
+        self._btn_keep_top1.setToolTip("Keep only the best photo in this cluster")
+        self._btn_keep_top1.clicked.connect(lambda: self._keep_top_n(1))
+        actions.addWidget(self._btn_keep_top1)
+
+        self._btn_keep_top2 = QPushButton("Keep Top 2")
+        self._btn_keep_top2.setToolTip("Keep the top 2 photos in this cluster")
+        self._btn_keep_top2.clicked.connect(lambda: self._keep_top_n(2))
+        actions.addWidget(self._btn_keep_top2)
+
+        self._btn_delete_rest = QPushButton("Delete Rest")
+        self._btn_delete_rest.setToolTip("Mark all non-KEEP photos as DELETE")
+        self._btn_delete_rest.clicked.connect(self._delete_rest)
+        actions.addWidget(self._btn_delete_rest)
+
+        self._btn_mark_reviewed = QPushButton("Mark Reviewed")
+        self._btn_mark_reviewed.clicked.connect(self._mark_reviewed)
+        actions.addWidget(self._btn_mark_reviewed)
 
         actions.addSpacing(15)
 
-        btn_apply_cluster = QPushButton("Apply Cluster")
-        btn_apply_cluster.setToolTip("Apply changes for this cluster only (move/delete files)")
-        btn_apply_cluster.setStyleSheet(
+        self._btn_apply_cluster = QPushButton("Apply Cluster")
+        self._btn_apply_cluster.setToolTip("Apply changes for this cluster only (move/delete files)")
+        self._btn_apply_cluster.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; "
             "padding: 4px 12px; border-radius: 3px; font-weight: bold; }"
             "QPushButton:hover { background-color: #1976D2; }"
         )
-        btn_apply_cluster.clicked.connect(self._apply_cluster)
-        actions.addWidget(btn_apply_cluster)
+        self._btn_apply_cluster.clicked.connect(self._apply_cluster)
+        actions.addWidget(self._btn_apply_cluster)
 
         actions.addStretch()
         layout.addLayout(actions)
+
+        # Per-cluster-only actions — disabled in the whole-batch view, where
+        # they would be meaningless or dangerous (e.g. "Keep Top 1" across the
+        # entire library). The three "…All" buttons stay live in both modes:
+        # in the flat view they act on the whole filtered set (with a confirm).
+        self._cluster_only_buttons = [
+            self._btn_keep_top1, self._btn_keep_top2, self._btn_delete_rest,
+            self._btn_mark_reviewed, self._btn_apply_cluster,
+        ]
+        self._sync_action_labels()
 
         # ── Status bar ──
         status_row = QHBoxLayout()
@@ -1132,6 +1399,16 @@ class ReviewView(QWidget):
         self._quality_filter.setCurrentIndex(0)
         self._quality_filter.blockSignals(False)
 
+        # Reset expression filter
+        self._expr_filter.blockSignals(True)
+        self._expr_filter.setCurrentIndex(0)
+        self._expr_filter.blockSignals(False)
+
+        # Reset duplicate filter
+        self._dup_filter.blockSignals(True)
+        self._dup_filter.setCurrentIndex(0)
+        self._dup_filter.blockSignals(False)
+
         self._apply_filters()
 
     @Slot(str, str)
@@ -1150,11 +1427,14 @@ class ReviewView(QWidget):
     # ── Filtering ────────────────────────────────────────
 
     def _low_quality_photo_ids(self) -> set[str]:
-        """Standalone (single-photo cluster) photos flagged as low quality."""
+        """Every photo flagged as low quality, across all groups — so the
+        'Low Quality' filter gathers the whole junk pile (standalone shots
+        AND members of all-junk similar/duplicate groups) for a quick sweep."""
         ids: set[str] = set()
         for members in self._cluster_photos.values():
-            if len(members) == 1 and is_low_quality_singleton(members[0]):
-                ids.add(members[0].id)
+            for p in members:
+                if is_low_quality(p):
+                    ids.add(p.id)
         return ids
 
     def current_zoom(self) -> int:
@@ -1179,6 +1459,9 @@ class ReviewView(QWidget):
         return {
             "face": self._face_filter.currentText(),
             "quality": self._quality_filter.currentText(),
+            "expr": self._expr_filter.currentText(),
+            "dup": self._dup_filter.currentText(),
+            "view": self._view_combo.currentText(),
             "event_idx": self._event_filter.currentIndex(),
             "hide_singletons": self._hide_singletons.isChecked(),
             "search": self._search_box.text(),
@@ -1193,12 +1476,16 @@ class ReviewView(QWidget):
         for widget, setter, value in (
             (self._face_filter, self._face_filter.setCurrentText, state.get("face")),
             (self._quality_filter, self._quality_filter.setCurrentText, state.get("quality")),
+            (self._expr_filter, self._expr_filter.setCurrentText, state.get("expr")),
+            (self._dup_filter, self._dup_filter.setCurrentText, state.get("dup")),
+            (self._view_combo, self._view_combo.setCurrentText, state.get("view")),
             (self._hide_singletons, self._hide_singletons.setChecked, state.get("hide_singletons")),
         ):
             widget.blockSignals(True)
             if value is not None:
                 setter(value)
             widget.blockSignals(False)
+        self._sync_action_labels()
         self._event_filter.blockSignals(True)
         idx = state.get("event_idx", 0)
         if idx is not None and 0 <= idx < self._event_filter.count():
@@ -1244,7 +1531,7 @@ class ReviewView(QWidget):
         if event_id:
             passing_photo_ids = self._event_photos.get(event_id, set()).copy()
 
-        # Quality filter (low-quality standalone photos)
+        # Quality filter (every low-quality photo, across all groups)
         if quality_filter == QUALITY_FILTER_LOW:
             low_ids = self._low_quality_photo_ids()
             passing_photo_ids = (
@@ -1273,6 +1560,30 @@ class ReviewView(QWidget):
             else:
                 passing_photo_ids = face_ids
 
+        # Duplicate-type filter (O4).
+        dup_filter = self._dup_filter.currentText()
+        if dup_filter != DUP_FILTER_ALL:
+            dup_ids = {
+                p.id for photos in self._cluster_photos.values() for p in photos
+                if photo_matches_dup(p, dup_filter)
+            }
+            passing_photo_ids = (
+                dup_ids if passing_photo_ids is None
+                else passing_photo_ids & dup_ids
+            )
+
+        # Expression filter (O5): people photos by likability.
+        expr_filter = self._expr_filter.currentText()
+        if expr_filter != EXPR_FILTER_ALL:
+            expr_ids = {
+                p.id for photos in self._cluster_photos.values() for p in photos
+                if photo_matches_expression(p, expr_filter)
+            }
+            passing_photo_ids = (
+                expr_ids if passing_photo_ids is None
+                else passing_photo_ids & expr_ids
+            )
+
         # Filename search (FEAT-05).
         query = self._search_box.text().strip().lower()
         if query:
@@ -1284,6 +1595,10 @@ class ReviewView(QWidget):
                 search_ids if passing_photo_ids is None
                 else passing_photo_ids & search_ids
             )
+
+        # Remember the filtered photo set so the whole-batch view and the
+        # cross-cluster batch actions operate on exactly what's showing.
+        self._passing_photo_ids = passing_photo_ids
 
         # Filter clusters: show clusters that have at least one passing photo
         if passing_photo_ids is not None:
@@ -1329,7 +1644,11 @@ class ReviewView(QWidget):
 
         self._update_global_counts()
 
-        if self._clusters:
+        if self._in_global_view():
+            # Whole batch in one ranked grid; the cluster list is inert here.
+            self._cluster_list.setCurrentRow(-1)
+            self._show_all_photos_ranked()
+        elif self._clusters:
             self._cluster_list.setCurrentRow(0)
         else:
             # Clear grid
@@ -1344,6 +1663,8 @@ class ReviewView(QWidget):
         filters_active = (
             self._face_filter.currentText() != FACE_FILTER_ALL
             or self._quality_filter.currentText() != QUALITY_FILTER_ALL
+            or self._expr_filter.currentText() != EXPR_FILTER_ALL
+            or self._dup_filter.currentText() != DUP_FILTER_ALL
             or self._event_filter.currentIndex() > 0
         )
         if filters_active:
@@ -1363,6 +1684,8 @@ class ReviewView(QWidget):
 
     @Slot(int)
     def _on_cluster_selected(self, row: int):
+        if self._in_global_view():
+            return  # cluster list is inert in the whole-batch view
         if row < 0 or row >= len(self._clusters):
             return
         self._current_cluster_idx = row
@@ -1385,11 +1708,87 @@ class ReviewView(QWidget):
             self._select_photo(ordered[0].id)
 
     def _on_sort_changed(self):
-        """Re-render the current group in the newly chosen order (FEAT-05)."""
-        if 0 <= self._current_cluster_idx < len(self._clusters):
+        """Re-render the current view in the newly chosen order (FEAT-05)."""
+        if self._in_global_view():
+            self._show_all_photos_ranked()
+        elif 0 <= self._current_cluster_idx < len(self._clusters):
             cluster = self._clusters[self._current_cluster_idx]
             photos = self._cluster_photos.get(cluster.id, [])
             self._show_cluster_photos(cluster, photos)
+
+    # ── Whole-batch ("All photos, ranked") view (O1) ─────
+
+    def _in_global_view(self) -> bool:
+        return self._view_combo.currentText() == VIEW_ALL
+
+    def _filtered_photos(self) -> list[Photo]:
+        """Every photo that passes the active filters, across all clusters.
+        This is the true batch-action target — not the (possibly capped) set
+        rendered in the grid."""
+        photos = self._all_photos()
+        if self._passing_photo_ids is not None:
+            photos = [p for p in photos if p.id in self._passing_photo_ids]
+        return photos
+
+    def _show_all_photos_ranked(self):
+        """Lay every filtered photo out in one quality order (O1)."""
+        ordered = sort_photos(self._filtered_photos(),
+                              self._sort_combo.currentText())
+        self._flat_total = len(ordered)
+        if len(ordered) > MAX_FLAT_GRID:
+            ordered = ordered[:MAX_FLAT_GRID]
+        self._preview_pixmaps.clear()
+        self._current_photos = ordered
+        self._current_cluster_idx = -1
+        self._rebuild_grid_with_zoom()
+        if ordered:
+            self._select_photo(ordered[0].id)
+        shown = len(ordered)
+        if not self._flat_total:
+            self._cluster_pos_label.setText(self._empty_state_message())
+        elif self._flat_total > shown:
+            self._cluster_pos_label.setText(
+                f"All photos (ranked) — showing top {shown} of "
+                f"{self._flat_total}; narrow with filters to reach the rest"
+            )
+        else:
+            self._cluster_pos_label.setText(
+                f"All {self._flat_total} photos (ranked)"
+            )
+
+    def _on_view_scope_changed(self):
+        self._sync_action_labels()
+        self._apply_filters()
+
+    def _sync_action_labels(self):
+        """Adapt the action row to the current view scope: the three '…All'
+        buttons act on the whole filtered set in the flat view; the
+        per-cluster-only buttons are disabled there."""
+        glob = self._in_global_view()
+        self._cluster_list.setEnabled(not glob)
+        for b in self._cluster_only_buttons:
+            b.setEnabled(not glob)
+        if glob:
+            self._btn_keep_all.setText("Keep All Shown")
+            self._btn_archive_all.setText("Archive All Shown")
+            self._btn_delete_all.setText("Delete All Shown")
+            self._btn_keep_all.setToolTip(
+                "Mark every photo matching the current filters as KEEP")
+            self._btn_archive_all.setToolTip(
+                "Move every photo matching the current filters to archive "
+                "(reversible)")
+            self._btn_delete_all.setToolTip(
+                "Send every photo matching the current filters to the "
+                "Recycle Bin")
+        else:
+            self._btn_keep_all.setText("Keep All")
+            self._btn_archive_all.setText("Archive All")
+            self._btn_delete_all.setText("Delete All")
+            self._btn_keep_all.setToolTip("Mark all photos in this cluster as KEEP")
+            self._btn_archive_all.setToolTip(
+                "Move all photos in this cluster to archive (safe, reversible)")
+            self._btn_delete_all.setToolTip(
+                "Permanently delete all photos in this cluster (Recycle Bin)")
 
     # ── Photo selection ──────────────────────────────────
 
@@ -1551,7 +1950,26 @@ class ReviewView(QWidget):
         self._set_all_verdict(Verdict.DELETE)
 
     def _set_all_verdict(self, verdict: Verdict):
-        photos = self._get_current_photos()
+        """Apply a verdict to the whole current target set — the selected
+        cluster in Groups view, or every filtered photo in the whole-batch
+        view (the fast reversible purge / shortlist, O2/O3)."""
+        photos = self._target_photos_for_bulk()
+        action = {
+            Verdict.KEEP: "Keep", Verdict.ARCHIVE: "Archive",
+            Verdict.DELETE: "Delete", Verdict.REVIEW: "Flag",
+        }.get(verdict, "Update")
+        if not self._confirm_bulk(action, verdict, len(photos)):
+            return
+        self._apply_bulk_verdict(photos, verdict)
+
+    def _target_photos_for_bulk(self) -> list[Photo]:
+        if self._in_global_view():
+            return self._filtered_photos()
+        return self._get_current_photos()
+
+    def _apply_bulk_verdict(self, photos: list[Photo], verdict: Verdict):
+        """Pure mutation (no dialog) — set the verdict on every photo, refresh
+        any on-screen widgets, and record one undo step."""
         for p in photos:
             p.verdict = verdict
             p.user_override = True
@@ -1561,6 +1979,37 @@ class ReviewView(QWidget):
         self._update_global_counts()
         self._update_cluster_list_item()
         self.review_state_changed.emit()
+
+    def _confirm_bulk(self, action_word: str, verdict: Verdict, count: int) -> bool:
+        """Confirm a bulk verdict when it's consequential — any DELETE, any
+        whole-batch action, or more than 25 photos. Small per-cluster
+        Keep/Archive stay one-click."""
+        if count <= 0:
+            return False
+        noisy = (
+            self._in_global_view()
+            or verdict == Verdict.DELETE
+            or count > 25
+        )
+        if not noisy:
+            return True
+        if verdict == Verdict.DELETE:
+            tail = ("\n\nThey go to the Recycle Bin — recoverable from "
+                    "Windows, but the app won't undo it.")
+        elif verdict == Verdict.ARCHIVE:
+            tail = "\n\nThey move to an archive folder on Apply (reversible)."
+        else:
+            tail = ""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(f"{action_word} {count} photo(s)?")
+        box.setText(
+            f"{action_word} {count} photo(s)?{tail}\n\n"
+            "Nothing moves until you click Apply Changes."
+        )
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        return box.exec() == QMessageBox.Yes
 
     def _keep_top_n(self, n: int):
         photos = self._get_current_photos()
@@ -1588,6 +2037,100 @@ class ReviewView(QWidget):
         self._update_global_counts()
         self._update_cluster_list_item()
         self.review_state_changed.emit()
+
+    # ── Duplicate resolution (O4) ────────────────────────
+
+    def _plan_exact_dup_resolution(self) -> list:
+        """Build a (photo, verdict) plan: keep the best copy of every exact
+        (byte-identical) duplicate group, archive the rest. Reuses the same
+        (-quality, filepath) ranking the verdict engine uses."""
+        plan = []
+        for c in self._all_clusters:
+            if not c.is_exact_dup_group:
+                continue
+            members = self._cluster_photos.get(c.id, [])
+            if not members:
+                continue
+            ranked = sorted(members, key=lambda p: (-p.quality_score, p.filepath))
+            for i, p in enumerate(ranked):
+                plan.append((p, Verdict.KEEP if i == 0 else Verdict.ARCHIVE))
+        return plan
+
+    def _apply_resolution(self, plan: list):
+        for p, v in plan:
+            p.verdict = v
+            p.user_override = True
+            widget = self._thumb_widgets.get(p.id)
+            if widget:
+                widget.update_verdict(v)
+        self._update_global_counts()
+        self._update_cluster_list_item()
+        self.review_state_changed.emit()
+
+    def _resolve_exact_duplicates(self):
+        plan = self._plan_exact_dup_resolution()
+        if not plan:
+            QMessageBox.information(
+                self, "No exact duplicates",
+                "There are no exact (byte-identical) duplicate groups to "
+                "resolve.")
+            return
+        groups = sum(1 for _, v in plan if v == Verdict.KEEP)
+        archived = sum(1 for _, v in plan if v == Verdict.ARCHIVE)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Resolve exact duplicates?")
+        box.setText(
+            f"Keep the best copy of {groups} exact-duplicate group(s) and "
+            f"archive the other {archived} copy(ies)?\n\n"
+            "Archived copies move to the duplicates archive folder on Apply "
+            "(reversible). Nothing moves until you click Apply Changes.")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+        if box.exec() != QMessageBox.Yes:
+            return
+        self._apply_resolution(plan)
+
+    # ── Best-of shortlist + export (O2) ──────────────────
+
+    def _keep_best_per_event(self):
+        from app.core.shortlist import select_best_per_event
+        best = select_best_per_event(self._all_photos(), 1)
+        if not best:
+            QMessageBox.information(
+                self, "Nothing to shortlist", "There are no photos to shortlist.")
+            return
+        events = len({p.event_id for p in best})
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Keep the best of each event?")
+        box.setText(
+            f"Mark the best photo from each of {events} event(s) as KEEP "
+            f"({len(best)} photo(s))?\n\nOther photos keep their current "
+            "state. Nothing moves until you click Apply Changes.")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+        if box.exec() != QMessageBox.Yes:
+            return
+        self._apply_bulk_verdict(best, Verdict.KEEP)
+
+    def _export_keepers(self):
+        keepers = [p for p in self._all_photos() if p.verdict == Verdict.KEEP]
+        if not keepers:
+            QMessageBox.information(
+                self, "No keepers yet",
+                "No photos are marked KEEP. Shortlist some first, then export.")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose a folder to copy the keepers into")
+        if not folder:
+            return
+        from app.core.file_ops import export_photos
+        copied, errors = export_photos(keepers, folder)
+        msg = f"Copied {copied} keeper(s) to:\n{folder}\n\nYour originals are untouched."
+        if errors:
+            msg += f"\n\n{errors} photo(s) could not be copied."
+        QMessageBox.information(self, "Export complete", msg)
 
     def _mark_reviewed(self):
         if 0 <= self._current_cluster_idx < len(self._clusters):
@@ -1670,6 +2213,11 @@ class ReviewView(QWidget):
         self._archive_label.setText(f"{archive} ARCHIVE")
         self._delete_label.setText(f"{delete} DELETE")
         self._review_label.setText(f"{review} REVIEW")
+        # Live count of captured, actionable decisions on the Apply button, so
+        # the user sees exactly how much is pending before committing.
+        actionable = keep + archive + delete
+        self._apply_btn.setText(
+            f"Apply Changes ({actionable})" if actionable else "Apply Changes")
         self._update_review_progress()
 
     def _update_review_progress(self):

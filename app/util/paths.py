@@ -135,3 +135,15 @@ def move_no_overwrite(src: str, dest_path: str) -> str:
             return candidate
         counter += 1
         candidate = f"{stem}_{counter}{ext}"
+
+
+def copy_no_overwrite(src: str, dest_path: str) -> str:
+    """Copy src to dest_path without ever overwriting an existing file.
+
+    Unlike move_no_overwrite this leaves the source in place — used to export
+    a copy of the keepers to a folder the user picks, so their originals are
+    untouched. Returns the destination actually used (suffixed _1, _2, ... on
+    a name clash)."""
+    candidate = resolve_collision(dest_path)
+    shutil.copy2(extended_path(src), extended_path(candidate))
+    return candidate

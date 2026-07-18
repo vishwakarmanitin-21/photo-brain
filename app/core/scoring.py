@@ -69,6 +69,35 @@ def _exposure_quality(brightness: float) -> float:
     return max(0.0, 1.0 - abs(brightness - 128.0) / 128.0)
 
 
+# Exposure usability gate. A pitch-black or blown-out frame is effectively
+# unviewable no matter how sharp it is, but the sharpness term (45% of the
+# score) is deliberately contrast-normalized so darkness does NOT read as
+# blur — which let a near-black-but-in-focus frame ride sharpness to a
+# "decent" ~0.40 score. The gate multiplies the whole score toward zero at
+# the exposure extremes so such frames land in the low-quality lane.
+#
+# It is exactly 1.0 across the entire normal range [_DARK_OK, _BRIGHT_OK]
+# (real well-exposed photos measure ~80-180 mean gray), so it changes NOTHING
+# for ordinary photos and leaves the pinned formula untouched there. Only the
+# genuinely unusable extremes are pulled down.
+_DARK_UNUSABLE = 20.0    # at/below this mean gray: effectively black
+_DARK_OK = 64.0          # at/above this: darkness no longer gates the score
+_BRIGHT_OK = 220.0       # at/below this: brightness no longer gates the score
+_BRIGHT_UNUSABLE = 248.0  # at/above this mean gray: effectively blown out
+
+
+def _exposure_usability(brightness: float) -> float:
+    """Multiplier in [0, 1]: 1.0 across the usable band, ramping to 0 at the
+    pitch-black / blown-out extremes. Purely a function of mean brightness."""
+    if brightness <= _DARK_UNUSABLE or brightness >= _BRIGHT_UNUSABLE:
+        return 0.0
+    if brightness < _DARK_OK:
+        return (brightness - _DARK_UNUSABLE) / (_DARK_OK - _DARK_UNUSABLE)
+    if brightness > _BRIGHT_OK:
+        return (_BRIGHT_UNUSABLE - brightness) / (_BRIGHT_UNUSABLE - _BRIGHT_OK)
+    return 1.0
+
+
 def compute_quality_score(
     sharpness: float,
     brightness: float,
@@ -86,8 +115,13 @@ def compute_quality_score(
     face/expression signals. With the previous unbounded sharpness term
     the face signals were mathematically negligible and the "best shot"
     pick degenerated to "sharpest frame".
+
+    The weighted sum is then multiplied by an exposure usability gate
+    (`_exposure_usability`): the gate is 1.0 across the normal exposure
+    range, but collapses the score toward zero for a pitch-black or
+    blown-out frame that is unusable regardless of how sharp it is.
     """
-    return (
+    base = (
         0.45 * _normalized_sharpness(sharpness)
         + 0.13 * _exposure_quality(brightness)
         + 0.10 * (min(face_count, 3) / 3.0)
@@ -97,6 +131,7 @@ def compute_quality_score(
         + 0.04 * expression_naturalness
         + 0.02 * head_pose_frontal
     )
+    return base * _exposure_usability(brightness)
 
 
 def score_photo(filepath: str) -> tuple[float, float, float]:
@@ -138,18 +173,28 @@ def rescore_with_faces(photo: "Photo") -> float:
 # worse, so keeping it just clutters the KEEP set with an inferior near-dup.
 KEEP_GAP = 0.05
 
-# A standalone photo (no duplicates) scoring below this on the [0,1] scale is
-# genuinely low quality — clearly blurry or badly exposed — and is suggested
-# for archiving instead of auto-kept. Deliberately conservative: a decent
-# no-face snapshot lands around 0.40+, so only real junk falls below. The
-# suggestion is ARCHIVE (a reversible move), never DELETE.
+# A photo scoring below this on the [0,1] scale is genuinely low quality —
+# clearly blurry, or too dark/bright to use. Such a photo is FLAGGED for the
+# user (verdict REVIEW) rather than auto-kept: REVIEW is skipped on apply, so
+# nothing is moved or deleted until the user decides. Deliberately
+# conservative: a decent no-face snapshot lands around 0.40+, so only real
+# junk falls below. The exposure usability gate feeds this — a near-black
+# frame that used to ride sharpness to ~0.40 now lands well under the bar.
 LOW_QUALITY_THRESHOLD = 0.25
 
 
-def is_low_quality_singleton(photo: Photo) -> bool:
-    """True if a standalone photo is scoreable but clearly low quality."""
+def is_low_quality(photo: Photo) -> bool:
+    """True if a scoreable photo sits below the low-quality bar — clearly
+    blurry, or too dark/bright to be usable. Applies whether the photo stands
+    alone or sits inside a duplicate/similar group. Unscoreable (unreadable)
+    photos are not "low quality"; they are handled separately as REVIEW."""
     scoreable = photo.sharpness > 0.0 or photo.brightness > 0.0
     return scoreable and photo.quality_score < LOW_QUALITY_THRESHOLD
+
+
+def is_low_quality_singleton(photo: Photo) -> bool:
+    """Back-compat name for a standalone low-quality photo."""
+    return is_low_quality(photo)
 
 
 def effective_keep_count(photos: list[Photo], max_keep: int) -> int:
@@ -185,9 +230,16 @@ def suggest_verdicts(
     except:
       - unreadable/unscoreable files stay undecided (REVIEW) so the user
         actually looks at them instead of silently keeping a broken file;
-      - clearly low-quality photos (blurry/badly exposed) are suggested
-        for ARCHIVE — the "distill standalone junk" behavior. ARCHIVE is
-        a reversible move, so a misfire costs one undo, never a photo.
+      - clearly low-quality photos (blurry, or too dark/bright to use) are
+        FLAGGED for review (REVIEW), not auto-kept and not auto-moved — the
+        user does the final sweep. REVIEW is skipped on apply, so nothing
+        moves until they decide.
+
+    Multi-photo groups keep the best N and archive the redundant rest — but
+    when even the best frame is below the low-quality bar the whole group is
+    junk, so every member is flagged REVIEW instead of keeping "the best of a
+    bad bunch". (A clearly-worse near-duplicate of a GOOD keeper is still
+    ARCHIVE, as before — that is redundancy, not junk.)
     """
     if len(photos) <= 1:
         for p in photos:
@@ -195,19 +247,28 @@ def suggest_verdicts(
                 continue
             if p.sharpness <= 0.0 and p.brightness <= 0.0:
                 p.verdict = Verdict.REVIEW
-            elif is_low_quality_singleton(p):
-                p.verdict = Verdict.ARCHIVE
+            elif is_low_quality(p):
+                p.verdict = Verdict.REVIEW
             else:
                 p.verdict = Verdict.KEEP
         return photos
 
     # Sort by quality_score desc, then filepath asc for deterministic tiebreak
     ranked = sorted(photos, key=lambda p: (-p.quality_score, p.filepath))
+
+    # Is there a genuinely usable frame here at all? The top-ranked photo is
+    # the group's best; if even that is a scoreable-but-low-quality frame, the
+    # whole group is junk and every member is flagged rather than partly kept.
+    best = ranked[0]
+    whole_group_is_junk = is_low_quality(best)
+
     kept = 0
     for p in ranked:
         if p.user_override:
             continue
-        if kept < keep_count:
+        if whole_group_is_junk:
+            p.verdict = Verdict.REVIEW
+        elif kept < keep_count:
             p.verdict = Verdict.KEEP
             kept += 1
         else:

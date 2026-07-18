@@ -12,10 +12,34 @@ from app.core.session_store import SessionStore
 from app.util.paths import (
     KEEP_FOLDER, ARCHIVE_DUPES_FOLDER, ARCHIVE_LOW_QUALITY_FOLDER,
     get_output_dir, get_log_dir, resolve_collision,
-    extended_path, move_no_overwrite,
+    extended_path, move_no_overwrite, copy_no_overwrite,
 )
 
 log = logging.getLogger("photobrain.file_ops")
+
+
+def export_photos(photos: list[Photo], dest_dir: str) -> tuple[int, int]:
+    """Copy each photo's file into dest_dir, leaving the originals in place.
+
+    The best-of shortlist export (O2): hand a folder of just the keepers to
+    someone without moving or altering the library. Returns (copied, errors).
+    """
+    os.makedirs(dest_dir, exist_ok=True)
+    copied = 0
+    errors = 0
+    for photo in photos:
+        try:
+            src = os.path.normpath(photo.filepath)
+            if not os.path.isfile(extended_path(src)):
+                log.warning("Export source missing: %s", src)
+                errors += 1
+                continue
+            copy_no_overwrite(src, os.path.join(dest_dir, photo.filename))
+            copied += 1
+        except Exception as e:
+            log.error("Failed to export %s: %s", photo.filepath, e)
+            errors += 1
+    return copied, errors
 
 
 def find_last_copy_deletions(photos: list[Photo]) -> list[Photo]:
