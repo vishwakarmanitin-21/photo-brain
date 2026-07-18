@@ -85,6 +85,18 @@ SORT_LARGEST = "Largest first"
 SORT_SMALLEST = "Smallest first"
 SORT_OPTIONS = [SORT_BEST, SORT_NEWEST, SORT_OLDEST, SORT_LARGEST, SORT_SMALLEST]
 
+# View scope (O1): review one duplicate group at a time, or the whole batch
+# laid out in a single quality order.
+VIEW_GROUPS = "Groups"
+VIEW_ALL = "All photos (ranked)"
+VIEW_OPTIONS = [VIEW_GROUPS, VIEW_ALL]
+
+# Safety cap: the flat all-photos grid renders at most this many widgets at
+# once (real batches are a few hundred photos; this only bites pathological
+# libraries). When it bites, the lowest-quality tail is what's dropped from
+# the grid — it is still counted and still swept by batch actions.
+MAX_FLAT_GRID = 600
+
 
 def sort_photos(photos: list, mode: str) -> list:
     """Return photos ordered per the chosen sort mode, filepath as a stable
@@ -503,6 +515,10 @@ class ReviewView(QWidget):
         self._selected_photo_id: str | None = None   # anchor / primary
         self._selected_ids: set[str] = set()          # full multi-selection
         self._current_photos: list[Photo] = []  # Current cluster photos
+        # Which photo ids pass the active filters (None = no filter). Kept so
+        # the whole-batch view and batch actions share one filtered set.
+        self._passing_photo_ids: set[str] | None = None
+        self._flat_total = 0  # total photos in the flat view before render cap
         # Verdict-level undo: shadow of the last-checkpointed (verdict,
         # user_override) per photo, and a stack of prior states to restore.
         self._verdict_shadow: dict[str, tuple] = {}
@@ -682,6 +698,22 @@ class ReviewView(QWidget):
         self._sort_combo.currentTextChanged.connect(self._on_sort_changed)
         filter_bar.addWidget(self._sort_combo)
 
+        filter_bar.addSpacing(15)
+
+        # View scope (O1): one group at a time, or the whole batch ranked.
+        filter_bar.addWidget(QLabel("View:"))
+        self._view_combo = QComboBox()
+        self._view_combo.addItems(VIEW_OPTIONS)
+        self._view_combo.setToolTip(
+            "Groups: review one similar/duplicate group at a time.\n"
+            "All photos (ranked): every photo laid out in one quality order "
+            "across the whole batch — combine with a filter and the batch "
+            "buttons to shortlist or purge in one pass."
+        )
+        self._view_combo.currentTextChanged.connect(self._on_view_scope_changed)
+        self._view_combo.setMinimumWidth(150)
+        filter_bar.addWidget(self._view_combo)
+
         filter_bar.addStretch()
 
         # Overall review progress (FEAT-05).
@@ -727,71 +759,78 @@ class ReviewView(QWidget):
         # ── Action buttons row ──
         actions = QHBoxLayout()
 
-        btn_keep_all = QPushButton("Keep All")
-        btn_keep_all.setToolTip("Mark all photos in this cluster as KEEP")
-        btn_keep_all.setStyleSheet(
+        self._btn_keep_all = QPushButton("Keep All")
+        self._btn_keep_all.setStyleSheet(
             f"QPushButton {{ background-color: {COLOR_KEEP}; color: white; "
             f"padding: 4px 12px; border-radius: 3px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #45a049; }}"
         )
-        btn_keep_all.clicked.connect(self._keep_all)
-        actions.addWidget(btn_keep_all)
+        self._btn_keep_all.clicked.connect(self._keep_all)
+        actions.addWidget(self._btn_keep_all)
 
-        btn_archive_all = QPushButton("Archive All")
-        btn_archive_all.setToolTip("Move all photos in this cluster to archive (safe, reversible)")
-        btn_archive_all.setStyleSheet(
+        self._btn_archive_all = QPushButton("Archive All")
+        self._btn_archive_all.setStyleSheet(
             f"QPushButton {{ background-color: {COLOR_ARCHIVE}; color: white; "
             f"padding: 4px 12px; border-radius: 3px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #F57C00; }}"
         )
-        btn_archive_all.clicked.connect(self._archive_all)
-        actions.addWidget(btn_archive_all)
+        self._btn_archive_all.clicked.connect(self._archive_all)
+        actions.addWidget(self._btn_archive_all)
 
-        btn_delete_all = QPushButton("Delete All")
-        btn_delete_all.setToolTip("Permanently delete all photos in this cluster (sent to Recycle Bin)")
-        btn_delete_all.setStyleSheet(
+        self._btn_delete_all = QPushButton("Delete All")
+        self._btn_delete_all.setStyleSheet(
             f"QPushButton {{ background-color: {COLOR_DELETE}; color: white; "
             f"padding: 4px 12px; border-radius: 3px; font-weight: bold; }}"
             f"QPushButton:hover {{ background-color: #d32f2f; }}"
         )
-        btn_delete_all.clicked.connect(self._delete_all)
-        actions.addWidget(btn_delete_all)
+        self._btn_delete_all.clicked.connect(self._delete_all)
+        actions.addWidget(self._btn_delete_all)
 
         actions.addSpacing(10)
 
-        btn_keep_top1 = QPushButton("Keep Top 1")
-        btn_keep_top1.setToolTip("Keep only the best photo in this cluster")
-        btn_keep_top1.clicked.connect(lambda: self._keep_top_n(1))
-        actions.addWidget(btn_keep_top1)
+        self._btn_keep_top1 = QPushButton("Keep Top 1")
+        self._btn_keep_top1.setToolTip("Keep only the best photo in this cluster")
+        self._btn_keep_top1.clicked.connect(lambda: self._keep_top_n(1))
+        actions.addWidget(self._btn_keep_top1)
 
-        btn_keep_top2 = QPushButton("Keep Top 2")
-        btn_keep_top2.setToolTip("Keep the top 2 photos in this cluster")
-        btn_keep_top2.clicked.connect(lambda: self._keep_top_n(2))
-        actions.addWidget(btn_keep_top2)
+        self._btn_keep_top2 = QPushButton("Keep Top 2")
+        self._btn_keep_top2.setToolTip("Keep the top 2 photos in this cluster")
+        self._btn_keep_top2.clicked.connect(lambda: self._keep_top_n(2))
+        actions.addWidget(self._btn_keep_top2)
 
-        btn_delete_rest = QPushButton("Delete Rest")
-        btn_delete_rest.setToolTip("Mark all non-KEEP photos as DELETE")
-        btn_delete_rest.clicked.connect(self._delete_rest)
-        actions.addWidget(btn_delete_rest)
+        self._btn_delete_rest = QPushButton("Delete Rest")
+        self._btn_delete_rest.setToolTip("Mark all non-KEEP photos as DELETE")
+        self._btn_delete_rest.clicked.connect(self._delete_rest)
+        actions.addWidget(self._btn_delete_rest)
 
-        btn_mark_reviewed = QPushButton("Mark Reviewed")
-        btn_mark_reviewed.clicked.connect(self._mark_reviewed)
-        actions.addWidget(btn_mark_reviewed)
+        self._btn_mark_reviewed = QPushButton("Mark Reviewed")
+        self._btn_mark_reviewed.clicked.connect(self._mark_reviewed)
+        actions.addWidget(self._btn_mark_reviewed)
 
         actions.addSpacing(15)
 
-        btn_apply_cluster = QPushButton("Apply Cluster")
-        btn_apply_cluster.setToolTip("Apply changes for this cluster only (move/delete files)")
-        btn_apply_cluster.setStyleSheet(
+        self._btn_apply_cluster = QPushButton("Apply Cluster")
+        self._btn_apply_cluster.setToolTip("Apply changes for this cluster only (move/delete files)")
+        self._btn_apply_cluster.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; "
             "padding: 4px 12px; border-radius: 3px; font-weight: bold; }"
             "QPushButton:hover { background-color: #1976D2; }"
         )
-        btn_apply_cluster.clicked.connect(self._apply_cluster)
-        actions.addWidget(btn_apply_cluster)
+        self._btn_apply_cluster.clicked.connect(self._apply_cluster)
+        actions.addWidget(self._btn_apply_cluster)
 
         actions.addStretch()
         layout.addLayout(actions)
+
+        # Per-cluster-only actions — disabled in the whole-batch view, where
+        # they would be meaningless or dangerous (e.g. "Keep Top 1" across the
+        # entire library). The three "…All" buttons stay live in both modes:
+        # in the flat view they act on the whole filtered set (with a confirm).
+        self._cluster_only_buttons = [
+            self._btn_keep_top1, self._btn_keep_top2, self._btn_delete_rest,
+            self._btn_mark_reviewed, self._btn_apply_cluster,
+        ]
+        self._sync_action_labels()
 
         # ── Status bar ──
         status_row = QHBoxLayout()
@@ -1289,6 +1328,10 @@ class ReviewView(QWidget):
                 else passing_photo_ids & search_ids
             )
 
+        # Remember the filtered photo set so the whole-batch view and the
+        # cross-cluster batch actions operate on exactly what's showing.
+        self._passing_photo_ids = passing_photo_ids
+
         # Filter clusters: show clusters that have at least one passing photo
         if passing_photo_ids is not None:
             self._clusters = []
@@ -1333,7 +1376,11 @@ class ReviewView(QWidget):
 
         self._update_global_counts()
 
-        if self._clusters:
+        if self._in_global_view():
+            # Whole batch in one ranked grid; the cluster list is inert here.
+            self._cluster_list.setCurrentRow(-1)
+            self._show_all_photos_ranked()
+        elif self._clusters:
             self._cluster_list.setCurrentRow(0)
         else:
             # Clear grid
@@ -1367,6 +1414,8 @@ class ReviewView(QWidget):
 
     @Slot(int)
     def _on_cluster_selected(self, row: int):
+        if self._in_global_view():
+            return  # cluster list is inert in the whole-batch view
         if row < 0 or row >= len(self._clusters):
             return
         self._current_cluster_idx = row
@@ -1389,11 +1438,87 @@ class ReviewView(QWidget):
             self._select_photo(ordered[0].id)
 
     def _on_sort_changed(self):
-        """Re-render the current group in the newly chosen order (FEAT-05)."""
-        if 0 <= self._current_cluster_idx < len(self._clusters):
+        """Re-render the current view in the newly chosen order (FEAT-05)."""
+        if self._in_global_view():
+            self._show_all_photos_ranked()
+        elif 0 <= self._current_cluster_idx < len(self._clusters):
             cluster = self._clusters[self._current_cluster_idx]
             photos = self._cluster_photos.get(cluster.id, [])
             self._show_cluster_photos(cluster, photos)
+
+    # ── Whole-batch ("All photos, ranked") view (O1) ─────
+
+    def _in_global_view(self) -> bool:
+        return self._view_combo.currentText() == VIEW_ALL
+
+    def _filtered_photos(self) -> list[Photo]:
+        """Every photo that passes the active filters, across all clusters.
+        This is the true batch-action target — not the (possibly capped) set
+        rendered in the grid."""
+        photos = self._all_photos()
+        if self._passing_photo_ids is not None:
+            photos = [p for p in photos if p.id in self._passing_photo_ids]
+        return photos
+
+    def _show_all_photos_ranked(self):
+        """Lay every filtered photo out in one quality order (O1)."""
+        ordered = sort_photos(self._filtered_photos(),
+                              self._sort_combo.currentText())
+        self._flat_total = len(ordered)
+        if len(ordered) > MAX_FLAT_GRID:
+            ordered = ordered[:MAX_FLAT_GRID]
+        self._preview_pixmaps.clear()
+        self._current_photos = ordered
+        self._current_cluster_idx = -1
+        self._rebuild_grid_with_zoom()
+        if ordered:
+            self._select_photo(ordered[0].id)
+        shown = len(ordered)
+        if not self._flat_total:
+            self._cluster_pos_label.setText(self._empty_state_message())
+        elif self._flat_total > shown:
+            self._cluster_pos_label.setText(
+                f"All photos (ranked) — showing top {shown} of "
+                f"{self._flat_total}; narrow with filters to reach the rest"
+            )
+        else:
+            self._cluster_pos_label.setText(
+                f"All {self._flat_total} photos (ranked)"
+            )
+
+    def _on_view_scope_changed(self):
+        self._sync_action_labels()
+        self._apply_filters()
+
+    def _sync_action_labels(self):
+        """Adapt the action row to the current view scope: the three '…All'
+        buttons act on the whole filtered set in the flat view; the
+        per-cluster-only buttons are disabled there."""
+        glob = self._in_global_view()
+        self._cluster_list.setEnabled(not glob)
+        for b in self._cluster_only_buttons:
+            b.setEnabled(not glob)
+        if glob:
+            self._btn_keep_all.setText("Keep All Shown")
+            self._btn_archive_all.setText("Archive All Shown")
+            self._btn_delete_all.setText("Delete All Shown")
+            self._btn_keep_all.setToolTip(
+                "Mark every photo matching the current filters as KEEP")
+            self._btn_archive_all.setToolTip(
+                "Move every photo matching the current filters to archive "
+                "(reversible)")
+            self._btn_delete_all.setToolTip(
+                "Send every photo matching the current filters to the "
+                "Recycle Bin")
+        else:
+            self._btn_keep_all.setText("Keep All")
+            self._btn_archive_all.setText("Archive All")
+            self._btn_delete_all.setText("Delete All")
+            self._btn_keep_all.setToolTip("Mark all photos in this cluster as KEEP")
+            self._btn_archive_all.setToolTip(
+                "Move all photos in this cluster to archive (safe, reversible)")
+            self._btn_delete_all.setToolTip(
+                "Permanently delete all photos in this cluster (Recycle Bin)")
 
     # ── Photo selection ──────────────────────────────────
 
@@ -1555,7 +1680,26 @@ class ReviewView(QWidget):
         self._set_all_verdict(Verdict.DELETE)
 
     def _set_all_verdict(self, verdict: Verdict):
-        photos = self._get_current_photos()
+        """Apply a verdict to the whole current target set — the selected
+        cluster in Groups view, or every filtered photo in the whole-batch
+        view (the fast reversible purge / shortlist, O2/O3)."""
+        photos = self._target_photos_for_bulk()
+        action = {
+            Verdict.KEEP: "Keep", Verdict.ARCHIVE: "Archive",
+            Verdict.DELETE: "Delete", Verdict.REVIEW: "Flag",
+        }.get(verdict, "Update")
+        if not self._confirm_bulk(action, verdict, len(photos)):
+            return
+        self._apply_bulk_verdict(photos, verdict)
+
+    def _target_photos_for_bulk(self) -> list[Photo]:
+        if self._in_global_view():
+            return self._filtered_photos()
+        return self._get_current_photos()
+
+    def _apply_bulk_verdict(self, photos: list[Photo], verdict: Verdict):
+        """Pure mutation (no dialog) — set the verdict on every photo, refresh
+        any on-screen widgets, and record one undo step."""
         for p in photos:
             p.verdict = verdict
             p.user_override = True
@@ -1565,6 +1709,37 @@ class ReviewView(QWidget):
         self._update_global_counts()
         self._update_cluster_list_item()
         self.review_state_changed.emit()
+
+    def _confirm_bulk(self, action_word: str, verdict: Verdict, count: int) -> bool:
+        """Confirm a bulk verdict when it's consequential — any DELETE, any
+        whole-batch action, or more than 25 photos. Small per-cluster
+        Keep/Archive stay one-click."""
+        if count <= 0:
+            return False
+        noisy = (
+            self._in_global_view()
+            or verdict == Verdict.DELETE
+            or count > 25
+        )
+        if not noisy:
+            return True
+        if verdict == Verdict.DELETE:
+            tail = ("\n\nThey go to the Recycle Bin — recoverable from "
+                    "Windows, but the app won't undo it.")
+        elif verdict == Verdict.ARCHIVE:
+            tail = "\n\nThey move to an archive folder on Apply (reversible)."
+        else:
+            tail = ""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(f"{action_word} {count} photo(s)?")
+        box.setText(
+            f"{action_word} {count} photo(s)?{tail}\n\n"
+            "Nothing moves until you click Apply Changes."
+        )
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        return box.exec() == QMessageBox.Yes
 
     def _keep_top_n(self, n: int):
         photos = self._get_current_photos()
