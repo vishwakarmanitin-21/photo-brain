@@ -50,6 +50,8 @@ All terms normalized to [0,1]; score is in [0,1]. Sharpness is contrast-normaliz
 
 `0.45 * min(1, log(sharp_cnorm+1)/log(1001)) + 0.13 * (1-|brightness-128|/128) + 0.10 * (min(face_count,3)/3) + 0.12 * eyes_open + 0.09 * smile + 0.05 * isolation + 0.04 * expression + 0.02 * frontal`
 
+The weighted sum is then multiplied by an **exposure usability gate** (`_exposure_usability`): 1.0 across the normal range, ramping to 0 for a pitch-black or blown-out frame so a near-black-but-in-focus shot can't ride the sharpness term into the keep set. Photos below `LOW_QUALITY_THRESHOLD` (0.25) — including a similar/dup group whose *best* frame is below the bar — are flagged **REVIEW** (surfaced, not auto-kept, not auto-moved), never ARCHIVE/DELETE. A clearly-worse near-dup of a *good* keeper is still ARCHIVE (redundancy, not junk).
+
 ## Post-Change Checklist
 
 - [ ] Code runs without errors (`venv\Scripts\python run.py`)

@@ -100,7 +100,7 @@ The scan pipeline runs in the background with live progress:
 6. **Expression Analysis** — eyes-open and smile scoring for photos with faces
 7. **EXIF Events** — groups photos by time proximity using EXIF timestamps
 8. **Cluster** — groups similar photos using Union-Find on hash similarity
-9. **Suggest** — marks the best N photos per cluster as KEEP, rest as ARCHIVE
+9. **Suggest** — marks the best N photos per cluster as KEEP, rest as ARCHIVE. Genuinely low-quality photos (blurry, or too dark/blown-out to use) — including a whole similar group where *every* frame is junk — are left flagged as **undecided (REVIEW)** rather than auto-kept or auto-moved, so you make the final call
 
 The scan summary shows detailed statistics including face distance breakdown (close-up, distant, no faces, group shots) and expression analysis count.
 
@@ -123,7 +123,7 @@ Each thumbnail shows its decision as a coloured border **and** a corner letter b
 
 **Tooltips:** Hover any thumbnail to see detailed metrics: quality score, sharpness, brightness, face count, eyes open %, smile %, isolation %, expression naturalness %, and head pose frontal %.
 
-**Filters:** Filter by face distance, low-quality standalones, or events; hide single-photo auto-keeps; search by filename; and sort each group by quality, date, or size. An "N of M groups reviewed" indicator tracks progress, and **Export CSV** saves the full decision list before you apply.
+**Filters:** Filter by face distance, low-quality photos (every flagged junk shot across all groups), or events; hide single-photo auto-keeps; search by filename; and sort each group by quality, date, or size. An "N of M groups reviewed" indicator tracks progress, and **Export CSV** saves the full decision list before you apply.
 
 ### 4. Apply
 

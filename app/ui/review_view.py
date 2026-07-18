@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 )
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
-from app.core.scoring import is_low_quality_singleton
+from app.core.scoring import is_low_quality
 from app.ui.dialogs import ShortcutsHelpDialog
 from app.ui.compare_dialog import CompareDialog
 
@@ -75,7 +75,7 @@ FACE_FILTER_GROUP = "Group Shots (3+)"
 EVENT_FILTER_ALL = "All Events"
 
 QUALITY_FILTER_ALL = "All Quality"
-QUALITY_FILTER_LOW = "Low Quality (no dupes)"
+QUALITY_FILTER_LOW = "Low Quality"
 
 # Sort options for the photo grid (FEAT-05). Each maps to a (key, reverse) pair.
 SORT_BEST = "Best first"
@@ -633,8 +633,9 @@ class ReviewView(QWidget):
         self._quality_filter = QComboBox()
         self._quality_filter.addItems([QUALITY_FILTER_ALL, QUALITY_FILTER_LOW])
         self._quality_filter.setToolTip(
-            "Low Quality: standalone photos (no duplicates) that are blurry "
-            "or badly exposed — suggested for archiving."
+            "Low Quality: every photo flagged as junk — blurry, or too dark / "
+            "blown-out to use — across all groups. These are left undecided "
+            "(not kept, not moved) for you to sweep."
         )
         self._quality_filter.currentTextChanged.connect(self._apply_filters)
         self._quality_filter.setMinimumWidth(150)
@@ -1150,11 +1151,14 @@ class ReviewView(QWidget):
     # ── Filtering ────────────────────────────────────────
 
     def _low_quality_photo_ids(self) -> set[str]:
-        """Standalone (single-photo cluster) photos flagged as low quality."""
+        """Every photo flagged as low quality, across all groups — so the
+        'Low Quality' filter gathers the whole junk pile (standalone shots
+        AND members of all-junk similar/duplicate groups) for a quick sweep."""
         ids: set[str] = set()
         for members in self._cluster_photos.values():
-            if len(members) == 1 and is_low_quality_singleton(members[0]):
-                ids.add(members[0].id)
+            for p in members:
+                if is_low_quality(p):
+                    ids.add(p.id)
         return ids
 
     def current_zoom(self) -> int:
@@ -1244,7 +1248,7 @@ class ReviewView(QWidget):
         if event_id:
             passing_photo_ids = self._event_photos.get(event_id, set()).copy()
 
-        # Quality filter (low-quality standalone photos)
+        # Quality filter (every low-quality photo, across all groups)
         if quality_filter == QUALITY_FILTER_LOW:
             low_ids = self._low_quality_photo_ids()
             passing_photo_ids = (

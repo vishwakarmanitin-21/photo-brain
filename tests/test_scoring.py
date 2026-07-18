@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from app.core.models import Photo, Verdict
 from app.core.scoring import (
+    LOW_QUALITY_THRESHOLD,
     SHARPNESS_REF,
     compute_quality_score,
     compute_sharpness,
@@ -90,6 +91,37 @@ class QualityScoreFormulaTests(unittest.TestCase):
             eyes_open_score=1.0, smile_score=0.0,
         )
         self.assertGreater(sharp_neutral, blurred_smiling)
+
+
+class ExposureUsabilityGateTests(unittest.TestCase):
+    """A pitch-black or blown-out frame must not ride sharpness to a decent
+    score — the exposure gate collapses it into the low-quality lane, while
+    leaving the normal exposure range (and the pinned formula) untouched."""
+
+    def test_pitch_black_sharp_frame_scores_below_junk_bar(self):
+        # Near-black but 'in focus' — this is the screenshot case that used to
+        # score ~0.41 and get auto-kept.
+        black = compute_quality_score(sharpness=500.0, brightness=12.0)
+        self.assertLess(black, LOW_QUALITY_THRESHOLD)
+
+    def test_blown_out_sharp_frame_scores_below_junk_bar(self):
+        blown = compute_quality_score(sharpness=500.0, brightness=250.0)
+        self.assertLess(blown, LOW_QUALITY_THRESHOLD)
+
+    def test_normal_exposure_is_not_gated(self):
+        # The gate is exactly 1.0 across the normal range: a mid-exposed sharp
+        # frame keeps the full ungated formula value.
+        gated = compute_quality_score(sharpness=250.0, brightness=160.0)
+        ungated = (
+            0.45 * (math.log(251.0) / math.log(SHARPNESS_REF + 1.0))
+            + 0.13 * (1.0 - abs(160.0 - 128.0) / 128.0)
+        )
+        self.assertAlmostEqual(ungated, gated, places=12)
+
+    def test_dim_but_visible_frame_is_spared(self):
+        # A dim indoor frame (mean gray 64) is usable and must not be junked.
+        dim = compute_quality_score(sharpness=300.0, brightness=64.0)
+        self.assertGreater(dim, LOW_QUALITY_THRESHOLD)
 
 
 class SharpnessMeasurementTests(unittest.TestCase):
@@ -201,6 +233,29 @@ class MultiPhotoSuggestionTests(unittest.TestCase):
         self.assertEqual(Verdict.KEEP, by_id["b"])   # override preserved
         self.assertEqual(Verdict.KEEP, by_id["a"])   # top score kept
         self.assertEqual(Verdict.KEEP, by_id["c"])   # second score kept
+
+    def test_all_junk_group_is_flagged_not_kept(self):
+        # Every frame below the bar (e.g. a burst of near-black shots): none
+        # is auto-kept and none is auto-archived — all are flagged REVIEW so
+        # the user sweeps them. REVIEW is skipped on apply, so nothing moves.
+        photos = [self._photo("a", 0.10), self._photo("b", 0.08),
+                  self._photo("c", 0.05)]
+        for p in photos:            # make them scoreable (not 'unreadable')
+            p.sharpness = 100.0
+        suggest_verdicts(photos, keep_count=2)
+        self.assertTrue(all(p.verdict == Verdict.REVIEW for p in photos))
+
+    def test_junk_runner_up_of_a_good_keeper_is_still_archived(self):
+        # A good frame anchors the group, so a clearly-worse near-dup is
+        # redundancy (ARCHIVE), not junk (REVIEW) — the old behavior stands
+        # whenever there is a genuine keeper.
+        photos = [self._photo("a", 0.80), self._photo("b", 0.10)]
+        for p in photos:
+            p.sharpness = 100.0
+        suggest_verdicts(photos, keep_count=1)
+        by_id = {p.id: p.verdict for p in photos}
+        self.assertEqual(Verdict.KEEP, by_id["a"])
+        self.assertEqual(Verdict.ARCHIVE, by_id["b"])
 
 
 if __name__ == "__main__":
