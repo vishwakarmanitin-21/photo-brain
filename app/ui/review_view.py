@@ -936,6 +936,23 @@ class ReviewView(QWidget):
 
         actions.addSpacing(10)
 
+        # Best-of shortlist + export (O2) — global, work in either view.
+        self._btn_best_per_event = QPushButton("Keep Best/Event")
+        self._btn_best_per_event.setToolTip(
+            "Mark the single best photo from each event as KEEP — a quick "
+            "best-of shortlist across the whole batch.")
+        self._btn_best_per_event.clicked.connect(self._keep_best_per_event)
+        actions.addWidget(self._btn_best_per_event)
+
+        self._btn_export_keepers = QPushButton("Export Keepers…")
+        self._btn_export_keepers.setToolTip(
+            "Copy every KEEP photo into a folder you choose. Originals stay "
+            "exactly where they are.")
+        self._btn_export_keepers.clicked.connect(self._export_keepers)
+        actions.addWidget(self._btn_export_keepers)
+
+        actions.addSpacing(10)
+
         self._btn_keep_top1 = QPushButton("Keep Top 1")
         self._btn_keep_top1.setToolTip("Keep only the best photo in this cluster")
         self._btn_keep_top1.clicked.connect(lambda: self._keep_top_n(1))
@@ -2011,6 +2028,47 @@ class ReviewView(QWidget):
         if box.exec() != QMessageBox.Yes:
             return
         self._apply_resolution(plan)
+
+    # ── Best-of shortlist + export (O2) ──────────────────
+
+    def _keep_best_per_event(self):
+        from app.core.shortlist import select_best_per_event
+        best = select_best_per_event(self._all_photos(), 1)
+        if not best:
+            QMessageBox.information(
+                self, "Nothing to shortlist", "There are no photos to shortlist.")
+            return
+        events = len({p.event_id for p in best})
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Keep the best of each event?")
+        box.setText(
+            f"Mark the best photo from each of {events} event(s) as KEEP "
+            f"({len(best)} photo(s))?\n\nOther photos keep their current "
+            "state. Nothing moves until you click Apply Changes.")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+        if box.exec() != QMessageBox.Yes:
+            return
+        self._apply_bulk_verdict(best, Verdict.KEEP)
+
+    def _export_keepers(self):
+        keepers = [p for p in self._all_photos() if p.verdict == Verdict.KEEP]
+        if not keepers:
+            QMessageBox.information(
+                self, "No keepers yet",
+                "No photos are marked KEEP. Shortlist some first, then export.")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose a folder to copy the keepers into")
+        if not folder:
+            return
+        from app.core.file_ops import export_photos
+        copied, errors = export_photos(keepers, folder)
+        msg = f"Copied {copied} keeper(s) to:\n{folder}\n\nYour originals are untouched."
+        if errors:
+            msg += f"\n\n{errors} photo(s) could not be copied."
+        QMessageBox.information(self, "Export complete", msg)
 
     def _mark_reviewed(self):
         if 0 <= self._current_cluster_idx < len(self._clusters):
