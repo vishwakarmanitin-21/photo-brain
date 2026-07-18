@@ -94,6 +94,29 @@ EXPR_EYES_OPEN_MIN = 0.6  # eyes clearly open at/above this
 EXPR_EYES_SHUT_MAX = 0.5  # blinking/eyes-shut below this
 EXPR_FRONTAL_MIN = 0.4    # looking away when head_pose_frontal below this
 
+# Duplicate-type filter (O4): isolate exact byte-identical vs near-duplicate
+# vs unique photos. (Multi-photo groups are already isolated by the "Hide
+# single photos" checkbox; this splits them by kind.)
+DUP_FILTER_ALL = "All"
+DUP_FILTER_EXACT = "Exact duplicates"
+DUP_FILTER_NEAR = "Near duplicates"
+DUP_FILTER_UNIQUE = "Not duplicates"
+DUP_FILTER_OPTIONS = [
+    DUP_FILTER_ALL, DUP_FILTER_EXACT, DUP_FILTER_NEAR, DUP_FILTER_UNIQUE,
+]
+
+
+def photo_matches_dup(photo, dup_filter: str) -> bool:
+    if dup_filter == DUP_FILTER_ALL:
+        return True
+    if dup_filter == DUP_FILTER_EXACT:
+        return photo.dup_type == DupType.EXACT
+    if dup_filter == DUP_FILTER_NEAR:
+        return photo.dup_type == DupType.NEAR
+    if dup_filter == DUP_FILTER_UNIQUE:
+        return photo.dup_type == DupType.NONE
+    return True
+
 
 def photo_matches_expression(photo, expr_filter: str) -> bool:
     """True if a photo matches an expression filter. Only photos with a face
@@ -760,6 +783,20 @@ class ReviewView(QWidget):
 
         filter_bar.addSpacing(15)
 
+        # Duplicate-type filter (O4).
+        filter_bar.addWidget(QLabel("Dups:"))
+        self._dup_filter = QComboBox()
+        self._dup_filter.addItems(DUP_FILTER_OPTIONS)
+        self._dup_filter.setToolTip(
+            "Show only exact (byte-identical) duplicates, near-duplicates, or "
+            "unique photos."
+        )
+        self._dup_filter.currentTextChanged.connect(self._apply_filters)
+        self._dup_filter.setMinimumWidth(140)
+        filter_bar.addWidget(self._dup_filter)
+
+        filter_bar.addSpacing(15)
+
         # Hide single auto-keep photos — they need no decision and clutter
         # the list of real duplicate groups. (UX-08)
         self._hide_singletons = QCheckBox("Hide single photos")
@@ -886,6 +923,16 @@ class ReviewView(QWidget):
         )
         self._btn_delete_all.clicked.connect(self._delete_all)
         actions.addWidget(self._btn_delete_all)
+
+        actions.addSpacing(10)
+
+        # Global duplicate resolver (O4) — works in either view scope.
+        self._btn_resolve_dups = QPushButton("Resolve Exact Dups")
+        self._btn_resolve_dups.setToolTip(
+            "Across the whole batch: keep the best copy of every exact "
+            "(byte-identical) duplicate group and archive the rest.")
+        self._btn_resolve_dups.clicked.connect(self._resolve_exact_duplicates)
+        actions.addWidget(self._btn_resolve_dups)
 
         actions.addSpacing(10)
 
@@ -1278,6 +1325,11 @@ class ReviewView(QWidget):
         self._expr_filter.setCurrentIndex(0)
         self._expr_filter.blockSignals(False)
 
+        # Reset duplicate filter
+        self._dup_filter.blockSignals(True)
+        self._dup_filter.setCurrentIndex(0)
+        self._dup_filter.blockSignals(False)
+
         self._apply_filters()
 
     @Slot(str, str)
@@ -1329,6 +1381,7 @@ class ReviewView(QWidget):
             "face": self._face_filter.currentText(),
             "quality": self._quality_filter.currentText(),
             "expr": self._expr_filter.currentText(),
+            "dup": self._dup_filter.currentText(),
             "view": self._view_combo.currentText(),
             "event_idx": self._event_filter.currentIndex(),
             "hide_singletons": self._hide_singletons.isChecked(),
@@ -1345,6 +1398,7 @@ class ReviewView(QWidget):
             (self._face_filter, self._face_filter.setCurrentText, state.get("face")),
             (self._quality_filter, self._quality_filter.setCurrentText, state.get("quality")),
             (self._expr_filter, self._expr_filter.setCurrentText, state.get("expr")),
+            (self._dup_filter, self._dup_filter.setCurrentText, state.get("dup")),
             (self._view_combo, self._view_combo.setCurrentText, state.get("view")),
             (self._hide_singletons, self._hide_singletons.setChecked, state.get("hide_singletons")),
         ):
@@ -1426,6 +1480,18 @@ class ReviewView(QWidget):
                 passing_photo_ids &= face_ids
             else:
                 passing_photo_ids = face_ids
+
+        # Duplicate-type filter (O4).
+        dup_filter = self._dup_filter.currentText()
+        if dup_filter != DUP_FILTER_ALL:
+            dup_ids = {
+                p.id for photos in self._cluster_photos.values() for p in photos
+                if photo_matches_dup(p, dup_filter)
+            }
+            passing_photo_ids = (
+                dup_ids if passing_photo_ids is None
+                else passing_photo_ids & dup_ids
+            )
 
         # Expression filter (O5): people photos by likability.
         expr_filter = self._expr_filter.currentText()
@@ -1519,6 +1585,7 @@ class ReviewView(QWidget):
             self._face_filter.currentText() != FACE_FILTER_ALL
             or self._quality_filter.currentText() != QUALITY_FILTER_ALL
             or self._expr_filter.currentText() != EXPR_FILTER_ALL
+            or self._dup_filter.currentText() != DUP_FILTER_ALL
             or self._event_filter.currentIndex() > 0
         )
         if filters_active:
@@ -1891,6 +1958,59 @@ class ReviewView(QWidget):
         self._update_global_counts()
         self._update_cluster_list_item()
         self.review_state_changed.emit()
+
+    # ── Duplicate resolution (O4) ────────────────────────
+
+    def _plan_exact_dup_resolution(self) -> list:
+        """Build a (photo, verdict) plan: keep the best copy of every exact
+        (byte-identical) duplicate group, archive the rest. Reuses the same
+        (-quality, filepath) ranking the verdict engine uses."""
+        plan = []
+        for c in self._all_clusters:
+            if not c.is_exact_dup_group:
+                continue
+            members = self._cluster_photos.get(c.id, [])
+            if not members:
+                continue
+            ranked = sorted(members, key=lambda p: (-p.quality_score, p.filepath))
+            for i, p in enumerate(ranked):
+                plan.append((p, Verdict.KEEP if i == 0 else Verdict.ARCHIVE))
+        return plan
+
+    def _apply_resolution(self, plan: list):
+        for p, v in plan:
+            p.verdict = v
+            p.user_override = True
+            widget = self._thumb_widgets.get(p.id)
+            if widget:
+                widget.update_verdict(v)
+        self._update_global_counts()
+        self._update_cluster_list_item()
+        self.review_state_changed.emit()
+
+    def _resolve_exact_duplicates(self):
+        plan = self._plan_exact_dup_resolution()
+        if not plan:
+            QMessageBox.information(
+                self, "No exact duplicates",
+                "There are no exact (byte-identical) duplicate groups to "
+                "resolve.")
+            return
+        groups = sum(1 for _, v in plan if v == Verdict.KEEP)
+        archived = sum(1 for _, v in plan if v == Verdict.ARCHIVE)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Resolve exact duplicates?")
+        box.setText(
+            f"Keep the best copy of {groups} exact-duplicate group(s) and "
+            f"archive the other {archived} copy(ies)?\n\n"
+            "Archived copies move to the duplicates archive folder on Apply "
+            "(reversible). Nothing moves until you click Apply Changes.")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.Yes)
+        if box.exec() != QMessageBox.Yes:
+            return
+        self._apply_resolution(plan)
 
     def _mark_reviewed(self):
         if 0 <= self._current_cluster_idx < len(self._clusters):
