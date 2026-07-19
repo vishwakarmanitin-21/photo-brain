@@ -976,6 +976,53 @@ class ReviewView(QWidget):
 
         layout.addWidget(splitter, stretch=1)
 
+        # ── Selection bar ── teaches the multi-select gesture when idle, and
+        # turns into Keep/Archive/Delete-the-selection controls once 2+ photos
+        # are picked (Ctrl/Shift+click). Makes multi-select discoverable and
+        # mouse-driven, not keyboard-only.
+        sel_bar = QHBoxLayout()
+        self._selection_count_label = QLabel("")
+        self._selection_count_label.setStyleSheet("font-size: 12px;")
+        sel_bar.addWidget(self._selection_count_label)
+        sel_bar.addSpacing(8)
+
+        self._btn_select_all = QPushButton("Select All Shown")
+        self._btn_select_all.setToolTip(
+            "Select every photo currently shown, then Ctrl+click to unpick a "
+            "few before acting.")
+        self._btn_select_all.clicked.connect(self._select_all_shown)
+        sel_bar.addWidget(self._btn_select_all)
+
+        self._btn_keep_sel = QPushButton("Keep Selected")
+        self._btn_keep_sel.setStyleSheet(
+            f"QPushButton {{ background-color: {COLOR_KEEP}; color: white; "
+            f"padding: 3px 12px; border-radius: 3px; font-weight: bold; }}")
+        self._btn_keep_sel.clicked.connect(self._mark_keep)
+        sel_bar.addWidget(self._btn_keep_sel)
+
+        self._btn_archive_sel = QPushButton("Archive Selected")
+        self._btn_archive_sel.setStyleSheet(
+            f"QPushButton {{ background-color: {COLOR_ARCHIVE}; color: white; "
+            f"padding: 3px 12px; border-radius: 3px; font-weight: bold; }}")
+        self._btn_archive_sel.clicked.connect(self._mark_archive)
+        sel_bar.addWidget(self._btn_archive_sel)
+
+        self._btn_delete_sel = QPushButton("Delete Selected")
+        self._btn_delete_sel.setStyleSheet(
+            f"QPushButton {{ background-color: {COLOR_DELETE}; color: white; "
+            f"padding: 3px 12px; border-radius: 3px; font-weight: bold; }}")
+        self._btn_delete_sel.clicked.connect(self._mark_delete)
+        sel_bar.addWidget(self._btn_delete_sel)
+
+        self._btn_clear_sel = QPushButton("Clear")
+        self._btn_clear_sel.setToolTip("Deselect all")
+        self._btn_clear_sel.clicked.connect(self._clear_selection)
+        sel_bar.addWidget(self._btn_clear_sel)
+
+        sel_bar.addStretch()
+        layout.addLayout(sel_bar)
+        self._update_selection_bar()  # initial idle state (tip + Select All)
+
         # ── Action buttons row ──
         actions = QHBoxLayout()
 
@@ -1865,6 +1912,40 @@ class ReviewView(QWidget):
     def _apply_selection_visuals(self):
         for pid, widget in self._thumb_widgets.items():
             widget.set_selected(pid in self._selected_ids)
+        self._update_selection_bar()
+
+    def _update_selection_bar(self):
+        """When 2+ photos are picked, show Keep/Archive/Delete-selection
+        controls; otherwise teach the gesture."""
+        n = len(self._selected_ids)
+        multi = n >= 2
+        for b in (self._btn_keep_sel, self._btn_archive_sel,
+                  self._btn_delete_sel, self._btn_clear_sel):
+            b.setVisible(multi)
+        self._btn_select_all.setVisible(not multi)
+        if multi:
+            self._selection_count_label.setText(f"{n} photos selected —")
+            self._selection_count_label.setStyleSheet(
+                f"font-size: 12px; font-weight: bold; color: {COLOR_SELECTED};")
+        else:
+            self._selection_count_label.setText(
+                "Select several: Ctrl+click (or Shift+click a range), then "
+                "Keep / Archive / Delete them together.")
+            self._selection_count_label.setStyleSheet(
+                "font-size: 12px; color: #888;")
+
+    def _clear_selection(self):
+        self._selected_ids = set()
+        self._selected_photo_id = None
+        self._apply_selection_visuals()
+
+    def _select_all_shown(self):
+        """Select every photo currently rendered in the grid."""
+        self._selected_ids = {
+            p.id for p in self._current_photos if p.id in self._thumb_widgets
+        }
+        self._selected_photo_id = next(iter(self._selected_ids), None)
+        self._apply_selection_visuals()
 
     def _get_current_photos(self) -> list[Photo]:
         # The displayed (sorted) order, so keyboard navigation matches the grid.
@@ -1933,11 +2014,21 @@ class ReviewView(QWidget):
 
     @Slot(str, str)
     def _on_thumb_verdict_changed(self, photo_id: str, verdict_value: str):
-        """Handle verdict change from individual thumbnail buttons."""
-        for photo in self._current_photos:
-            if photo.id == photo_id:
-                photo.user_override = True
-                break
+        """Handle a verdict change from an on-card button. If the clicked photo
+        is part of a multi-selection, apply the same verdict to the whole
+        selection, so the on-card buttons respect multi-select too."""
+        verdict = Verdict(verdict_value)
+        if photo_id in self._selected_ids and len(self._selected_ids) > 1:
+            for pid in self._selected_ids:
+                widget = self._thumb_widgets.get(pid)
+                if widget:
+                    widget.photo.user_override = True
+                    widget.update_verdict(verdict)
+        else:
+            for photo in self._current_photos:
+                if photo.id == photo_id:
+                    photo.user_override = True
+                    break
         self._update_global_counts()
         self._update_cluster_list_item()
         self.review_state_changed.emit()

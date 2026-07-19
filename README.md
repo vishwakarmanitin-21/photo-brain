@@ -117,7 +117,7 @@ Each thumbnail shows its decision as a coloured border **and** a corner letter b
 
 **Zoom Controls:** Drag the zoom slider (120–800px) or use the `+`/`-` keys to adjust thumbnail size; `0` resets to the default. The grid reflows its column count to fit, and above the cached thumbnail size it loads high-quality images from the originals.
 
-**Multi-select:** `Ctrl`+click toggles individual photos, `Shift`+click selects a range. Keep/Archive/Delete then apply to the whole selection at once.
+**Multi-select:** `Ctrl`+click toggles individual photos, `Shift`+click selects a range, or hit **Select All Shown**. A **selection bar** under the grid then shows **"N photos selected"** with one-click **Keep / Archive / Delete Selected** (and **Clear**); the `K`/`A`/`D` keys and the on-card buttons apply to the whole selection too. It all undoes as a single step.
 
 **Hover Preview:** Hold `Alt` and hover over any thumbnail to see a full-size preview in a floating overlay — perfect for quick quality checks without opening files.
 

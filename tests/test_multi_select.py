@@ -75,6 +75,36 @@ class MultiSelectTests(unittest.TestCase):
         rv._select_photo("p3")
         self.assertEqual({"p3"}, rv._selected_ids)
 
+    def test_select_all_shown_and_clear(self):
+        rv, photos = self._view()
+        rv._select_all_shown()
+        self.assertEqual({p.id for p in photos}, rv._selected_ids)
+        rv._clear_selection()
+        self.assertEqual(set(), rv._selected_ids)
+
+    def test_on_card_button_applies_to_whole_selection(self):
+        # Clicking one card's Delete while several are selected hits them all.
+        rv, photos = self._view()
+        rv._select_photo("p0")
+        rv._toggle_selection("p1")
+        rv._toggle_selection("p2")
+        rv._on_thumb_verdict_changed("p1", "DELETE")
+        by_id = {p.id: p for p in photos}
+        self.assertEqual(Verdict.DELETE, by_id["p0"].verdict)
+        self.assertEqual(Verdict.DELETE, by_id["p1"].verdict)
+        self.assertEqual(Verdict.DELETE, by_id["p2"].verdict)
+        self.assertEqual(Verdict.REVIEW, by_id["p3"].verdict)  # untouched
+
+    def test_selection_bar_switches_to_actions_when_multi(self):
+        rv, photos = self._view()
+        rv._select_photo("p0")  # single selection -> idle bar
+        self.assertFalse(rv._btn_select_all.isHidden())
+        self.assertTrue(rv._btn_delete_sel.isHidden())
+        rv._toggle_selection("p1")  # now 2 selected -> action bar
+        self.assertIn("2 photos selected", rv._selection_count_label.text())
+        self.assertFalse(rv._btn_delete_sel.isHidden())
+        self.assertTrue(rv._btn_select_all.isHidden())
+
 
 if __name__ == "__main__":
     unittest.main()
