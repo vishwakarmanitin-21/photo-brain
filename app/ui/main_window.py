@@ -14,7 +14,9 @@ from app.util.app_settings import AppSettings
 from app.ui.setup_view import SetupView
 from app.ui.scan_view import ScanView
 from app.ui.review_view import ReviewView
-from app.ui.dialogs import SettingsDialog, ApplyConfirmDialog, UndoResultDialog
+from app.ui.dialogs import (
+    SettingsDialog, ApplyConfirmDialog, UndoResultDialog, _format_bytes,
+)
 from app.core.session_store import SessionStore
 from app.core.models import SessionStatus, Verdict
 from app.core.thumbnails import (
@@ -25,7 +27,7 @@ from app.workers.scan_worker import ScanWorker
 from app.workers.thumb_worker import ThumbWorker
 from app.workers.preview_worker import PreviewWorker
 from app.util.paths import (
-    get_db_path, get_thumb_dir, get_preview_dir, get_log_dir,
+    get_db_path, get_thumb_dir, get_preview_dir, get_log_dir, extended_path,
 )
 from app.util.logging_util import setup_logging
 
@@ -137,6 +139,7 @@ class MainWindow(QMainWindow):
         self.scan_view.cancel_requested.connect(self._cancel_scan)
         self.scan_view.continue_requested.connect(self._on_continue_to_review)
         self.review_view.apply_requested.connect(self._on_apply)
+        self.review_view.delete_now_requested.connect(self._on_delete_now)
         self.review_view.apply_cluster_requested.connect(self._on_apply_cluster)
         self.review_view.undo_requested.connect(self._on_undo)
         self.review_view.back_requested.connect(self._go_home)
@@ -474,6 +477,72 @@ class MainWindow(QMainWindow):
         except Exception as e:
             log.exception("Apply failed")
             QMessageBox.critical(self, "Apply Failed", _friendly_error(e))
+
+    @Slot()
+    def _on_delete_now(self):
+        """Interim step: recycle only the DELETE-marked photos now, leaving
+        Keep/Archive decisions pending, so a large folder clears gradually."""
+        if not self.store:
+            return
+        all_photos = self.review_view.get_all_photos()
+        to_delete = [p for p in all_photos if p.verdict == Verdict.DELETE]
+        if not to_delete:
+            QMessageBox.information(
+                self, "Nothing marked for deletion",
+                "No photos are marked for deletion yet. Mark some with the "
+                "Delete button (or the D key), then try again.")
+            return
+
+        # Persist the latest verdicts so the store matches the review view.
+        self.store.update_photos_batch(all_photos)
+
+        _kb, _ab, del_bytes = _verdict_bytes(to_delete)
+        last_copy = len(find_last_copy_deletions(all_photos))
+        if not self._confirm_delete_now(len(to_delete), del_bytes, last_copy):
+            return
+
+        try:
+            operator = FileOperator(self.source_folder, self.store, self.session_id)
+            processed, errors = operator.apply_verdicts(to_delete)
+
+            # Purge records whose files are actually gone (recycled) so they
+            # don't reappear as broken tiles on reload; a file that errored
+            # (still present) keeps its record + DELETE mark for a retry.
+            gone = [
+                p.id for p in to_delete
+                if not os.path.isfile(extended_path(os.path.normpath(p.filepath)))
+            ]
+            self.store.purge_photos(self.session_id, gone)
+
+            msg = f"Sent {processed} photo(s) to the Recycle Bin."
+            if errors:
+                msg += f"\n{errors} could not be deleted (see log)."
+            msg += "\n\nYour Keep/Archive decisions are still pending."
+            QMessageBox.information(self, "Deletions Applied", msg)
+
+            self._load_review(preserve_place=True)
+        except Exception as e:
+            log.exception("Delete-now failed")
+            QMessageBox.critical(self, "Delete Failed", _friendly_error(e))
+
+    def _confirm_delete_now(self, count: int, del_bytes: int, last_copy: int) -> bool:
+        text = f"Send {count} photo(s) marked for deletion to the Recycle Bin now?"
+        if del_bytes:
+            text += (f"\n\nFrees ~{_format_bytes(del_bytes)} once you empty the "
+                     "Recycle Bin.")
+        text += ("\n\nThis is an interim step — your Keep/Archive decisions "
+                 "stay pending. Recycle Bin deletions can't be undone from "
+                 "PhotoBrain.")
+        if last_copy:
+            text += (f"\n\n⚠ {last_copy} of these is the only copy in this "
+                     "batch (no kept duplicate).")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Delete marked photos now?")
+        box.setText(text)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        return box.exec() == QMessageBox.Yes
 
     @Slot(str)
     def _on_apply_cluster(self, cluster_id: str):

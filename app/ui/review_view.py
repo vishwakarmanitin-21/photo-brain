@@ -663,6 +663,7 @@ class ReviewView(QWidget):
     """Main review interface with cluster list and thumbnail grid."""
 
     apply_requested = Signal()
+    delete_now_requested = Signal()  # recycle just the DELETE-marked photos now
     apply_cluster_requested = Signal(str)  # cluster_id
     undo_requested = Signal()
     back_requested = Signal()
@@ -785,6 +786,23 @@ class ReviewView(QWidget):
 
         toolbar.addLayout(zoom_layout)
         toolbar.addSpacing(10)
+
+        # Interim delete: recycle only the DELETE-marked photos now, so a big
+        # folder can be cleared gradually without applying everything.
+        self._delete_now_btn = QPushButton("Delete Marked")
+        self._delete_now_btn.setToolTip(
+            "Send just the photos marked for deletion to the Recycle Bin now — "
+            "an interim step. Your Keep/Archive decisions stay pending.")
+        self._delete_now_btn.setStyleSheet(
+            "QPushButton { background-color: #F44336; color: white; "
+            "font-size: 13px; font-weight: bold; padding: 6px 16px; "
+            "border-radius: 4px; }"
+            "QPushButton:hover { background-color: #d32f2f; }"
+            "QPushButton:disabled { background-color: #e0a5a1; }"
+        )
+        self._delete_now_btn.setEnabled(False)
+        self._delete_now_btn.clicked.connect(self.delete_now_requested.emit)
+        toolbar.addWidget(self._delete_now_btn)
 
         self._apply_btn = QPushButton("Apply Changes")
         self._apply_btn.setToolTip(
@@ -2218,6 +2236,10 @@ class ReviewView(QWidget):
         actionable = keep + archive + delete
         self._apply_btn.setText(
             f"Apply Changes ({actionable})" if actionable else "Apply Changes")
+        # Interim-delete button reflects how many are queued for the Recycle Bin.
+        self._delete_now_btn.setText(
+            f"Delete Marked ({delete})" if delete else "Delete Marked")
+        self._delete_now_btn.setEnabled(delete > 0)
         self._update_review_progress()
 
     def _update_review_progress(self):

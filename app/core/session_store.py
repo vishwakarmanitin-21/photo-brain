@@ -441,6 +441,35 @@ class SessionStore:
         )
         self._conn.commit()
 
+    def purge_photos(self, session_id: str, photo_ids: list[str]) -> int:
+        """Permanently remove photo records (after their files were recycled),
+        then reconcile cluster member counts and drop any now-empty clusters.
+
+        Used by the interim 'Delete Marked Now' flow so recycled photos don't
+        reappear on the next review reload. Returns how many ids were purged.
+        """
+        if not photo_ids:
+            return 0
+        with self._transaction() as conn:
+            conn.executemany(
+                "DELETE FROM photos WHERE id=?", [(pid,) for pid in photo_ids]
+            )
+            for row in conn.execute(
+                "SELECT id FROM clusters WHERE session_id=?", (session_id,)
+            ).fetchall():
+                cid = row["id"]
+                remaining = conn.execute(
+                    "SELECT COUNT(*) FROM photos WHERE cluster_id=?", (cid,)
+                ).fetchone()[0]
+                if remaining == 0:
+                    conn.execute("DELETE FROM clusters WHERE id=?", (cid,))
+                else:
+                    conn.execute(
+                        "UPDATE clusters SET member_count=? WHERE id=?",
+                        (remaining, cid),
+                    )
+        return len(photo_ids)
+
     def update_photos_batch(self, photos: list[Photo]):
         with self._transaction() as conn:
             conn.executemany(

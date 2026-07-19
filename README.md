@@ -146,6 +146,8 @@ When satisfied with your decisions, apply the changes:
 
 A detailed log (CSV + JSON) is written for every apply operation.
 
+**Delete Marked Now (interim):** you don't have to finish the whole batch before reclaiming space. The red **"Delete Marked (N)"** button sends *just* the photos marked for deletion to the Recycle Bin right away — your Keep/Archive decisions stay pending — so a huge folder can be cleared gradually as you go. It confirms the count first (and warns if any is the only copy), and the recycled photos drop out of the review so they never come back as broken tiles.
+
 ### 5. Undo
 
 Changed your mind? Click "Undo Last Apply" to restore all moved files to their original locations. (Recycle Bin deletes cannot be undone from the app.)
