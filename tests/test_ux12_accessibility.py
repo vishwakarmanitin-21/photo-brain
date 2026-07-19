@@ -75,6 +75,20 @@ class GridNavigationTests(unittest.TestCase):
         rv._select_photo_above()  # 1 - 3 = -2 → clamp to 0
         self.assertEqual(photos[0].id, rv._selected_photo_id)
 
+    def test_arrow_then_verdict_acts_on_the_navigated_photo(self):
+        # The exact flow: arrow-navigate to a photo, then K/A/D categorises it.
+        rv, photos = self._view_with_photos(9)
+        rv._select_photo(photos[0].id)
+        rv._select_next_photo()          # Right arrow → p1
+        rv._select_next_photo()          # Right arrow → p2
+        self.assertEqual(photos[2].id, rv._selected_photo_id)
+        rv._mark_delete()                # D
+        self.assertEqual(Verdict.DELETE, photos[2].verdict)
+        rv._select_prev_photo()          # Left arrow → p1
+        rv._mark_keep()                  # K
+        self.assertEqual(Verdict.KEEP, photos[1].verdict)
+        self.assertEqual(Verdict.REVIEW, photos[0].verdict)  # untouched
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -588,9 +588,11 @@ class ThumbnailWidget(QFrame):
 
         # Card frame: a thick solid colour when decided; a dashed grey frame
         # while still undecided, so "needs a decision" reads differently from
-        # "handled". Selection wins with a blue frame.
+        # "handled". Selection wins with a bold blue frame — it's the photo the
+        # keyboard (K/A/D, arrows) acts on — while the verdict still shows
+        # through the card tint and chip.
         if self._selected:
-            border = f"3px solid {COLOR_SELECTED}"
+            border = f"4px solid {COLOR_SELECTED}"
         elif decided:
             border = f"5px solid {color}"
         else:
@@ -1821,12 +1823,25 @@ class ReviewView(QWidget):
             self._range_selection(photo_id)
         else:
             self._select_photo(photo_id)
+        # Reclaim keyboard focus for the grid: after the user has touched a
+        # filter/sort dropdown or the cluster list, focus is stuck there and
+        # the arrow keys / K,A,D shortcuts would drive that control instead of
+        # the photos. Clicking a photo puts the keyboard back on the grid.
+        self.setFocus()
 
     def _select_photo(self, photo_id: str):
         """Single-select: replaces the whole selection with one photo."""
         self._selected_photo_id = photo_id
         self._selected_ids = {photo_id} if photo_id in self._thumb_widgets else set()
         self._apply_selection_visuals()
+        self._ensure_selected_visible()
+
+    def _ensure_selected_visible(self):
+        """Scroll the grid so the selected photo is on screen — otherwise
+        arrow-key navigation moves an unseen selection and looks broken."""
+        widget = self._thumb_widgets.get(self._selected_photo_id)
+        if widget:
+            self._scroll.ensureWidgetVisible(widget, 0, 40)
 
     def _toggle_selection(self, photo_id: str):
         if photo_id in self._selected_ids:
