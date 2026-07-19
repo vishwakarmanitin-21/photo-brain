@@ -22,7 +22,8 @@ class SettingsPresetTests(unittest.TestCase):
         return d
 
     def test_default_threshold_selects_recommended_preset(self):
-        d = self._dlg(17)
+        recommended_threshold = GROUPING_PRESETS[1][1]
+        d = self._dlg(recommended_threshold)
         self.assertEqual("Similar shots (recommended)",
                          d._preset_combo.currentText())
 

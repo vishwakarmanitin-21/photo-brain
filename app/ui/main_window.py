@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
         # Settings defaults — seeded from saved preferences so choices persist
         # across launches (UX-13).
         self._settings = AppSettings()
-        self._phash_threshold = self._settings.threshold(17)
+        self._phash_threshold = self._settings.threshold(11)
         self._keep_per_cluster = self._settings.keep_per_cluster(2)
         self._event_gap_hours = self._settings.event_gap_hours(4.0)
         self._face_detection_enabled = self._settings.face_detection(True)

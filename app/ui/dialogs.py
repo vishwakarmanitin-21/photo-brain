@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 # The number stays available under "Advanced" for power users.
 GROUPING_PRESETS = [
     ("Only near-identical", 8),
-    ("Similar shots (recommended)", 17),
+    ("Similar shots (recommended)", 11),
     ("Loose grouping", 24),
 ]
 
@@ -27,7 +27,7 @@ def _format_bytes(n: float) -> str:
 class SettingsDialog(QDialog):
     def __init__(
         self,
-        threshold: int = 17,
+        threshold: int = 11,
         keep_count: int = 2,
         event_gap_hours: float = 4.0,
         face_detection_enabled: bool = True,

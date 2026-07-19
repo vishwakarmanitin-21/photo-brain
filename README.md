@@ -99,7 +99,7 @@ The scan pipeline runs in the background with live progress:
 5. **Face Detection** — multi-scale detection (original + downscaled) for close-up and distant faces
 6. **Expression Analysis** — eyes-open and smile scoring for photos with faces
 7. **EXIF Events** — groups photos by time proximity using EXIF timestamps
-8. **Cluster** — groups similar photos using Union-Find on hash similarity
+8. **Cluster** — groups near-duplicates by perceptual-hash similarity **and** capture-time proximity: two photos are only grouped if their pHashes are close **and** they were taken within ~30 minutes of each other, so a coincidental hash collision between shots from different days/occasions no longer lands them in the same group. (Exact byte-identical duplicates are grouped regardless of time.)
 9. **Suggest** — marks the best N photos per cluster as KEEP, rest as ARCHIVE. Genuinely low-quality photos (blurry, or too dark/blown-out to use) — including a whole similar group where *every* frame is junk — are left flagged as **undecided (REVIEW)** rather than auto-kept or auto-moved, so you make the final call
 
 The scan summary shows detailed statistics including face distance breakdown (close-up, distant, no faces, group shots) and expression analysis count.

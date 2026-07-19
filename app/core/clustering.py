@@ -2,11 +2,43 @@
 import logging
 import uuid
 from collections import defaultdict
+from datetime import datetime
+from typing import Optional
 
 from app.core.models import Photo, Cluster, DupType
 from app.core.hashing import hamming_distance
 
 log = logging.getLogger("photobrain.clustering")
+
+# Near-duplicates are taken close together in time (a burst or a couple of
+# retakes of the same moment). Beyond this gap two photos are treated as
+# different occasions even if their perceptual hashes happen to collide — this
+# stops e.g. a kayak selfie from joining a street photo taken four days later.
+# When either photo has no usable timestamp the gate can't judge and does NOT
+# block (falls back to pHash-only).
+NEAR_DUP_MAX_TIME_GAP_SECONDS = 1800.0  # 30 minutes
+
+
+def _photo_time(photo: Photo) -> Optional[datetime]:
+    if not photo.exif_datetime:
+        return None
+    try:
+        return datetime.fromisoformat(photo.exif_datetime)
+    except ValueError:
+        return None
+
+
+def _within_time_gap(a: Photo, b: Photo, max_gap_seconds: Optional[float]) -> bool:
+    """True if two photos are close enough in capture time to be near-dups."""
+    if max_gap_seconds is None:
+        return True
+    ta, tb = _photo_time(a), _photo_time(b)
+    if ta is None or tb is None:
+        return True  # can't judge without both timestamps → don't block
+    try:
+        return abs((ta - tb).total_seconds()) <= max_gap_seconds
+    except TypeError:
+        return True  # mixed tz-awareness → don't block
 
 
 class UnionFind:
@@ -52,7 +84,8 @@ def group_by_sha256(photos: list[Photo]) -> dict[str, list[Photo]]:
 
 
 def build_clusters(
-    photos: list[Photo], threshold: int = 17
+    photos: list[Photo], threshold: int = 11,
+    max_time_gap_seconds: Optional[float] = NEAR_DUP_MAX_TIME_GAP_SECONDS,
 ) -> tuple[list[Cluster], dict[str, list[Photo]]]:
     """Full clustering pipeline.
 
@@ -60,7 +93,8 @@ def build_clusters(
     2. Mark exact dup groups (size > 1) with dup_type=EXACT.
     3. Pick one representative per SHA256 group for pHash comparison.
     4. Anchor-based clustering: each representative joins the first cluster
-       whose anchor is within `threshold`, else it starts a new cluster.
+       whose anchor is within `threshold` pHash distance AND within
+       `max_time_gap_seconds` of capture time, else it starts a new cluster.
     5. Merge SHA256 groups into their pHash clusters.
     6. Build Cluster objects.
 
@@ -70,6 +104,13 @@ def build_clusters(
     are dissimilar. On real libraries plain union-find built clusters of
     dozens of unrelated photos spanning hours; anchoring caps each cluster
     to a ball of radius `threshold` around its representative.
+
+    The capture-time gate adds a second constraint: perceptual hashing only
+    sees coarse light/dark structure, so two different photos can collide.
+    Requiring near-dups to be taken close together (default 30 min) rejects
+    those cross-occasion false positives. Pass max_time_gap_seconds=None to
+    disable the gate (pure pHash grouping). Exact SHA256 duplicates are never
+    gated — identical files are duplicates regardless of when they were shot.
     """
     if not photos:
         return [], {}
@@ -105,7 +146,8 @@ def build_clusters(
                 if not anchor.phash:
                     continue
                 comparisons += 1
-                if hamming_distance(rep.phash, anchor.phash) <= threshold:
+                if (hamming_distance(rep.phash, anchor.phash) <= threshold
+                        and _within_time_gap(rep, anchor, max_time_gap_seconds)):
                     chosen = anchor
                     break
         if chosen is None:

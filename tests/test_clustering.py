@@ -11,6 +11,7 @@ def make_photo(
     phash: str | None,
     quality: float = 1.0,
     filepath: str | None = None,
+    exif_datetime: str | None = None,
 ) -> Photo:
     path = filepath or f"C:/photos/{photo_id}.jpg"
     return Photo(
@@ -21,6 +22,7 @@ def make_photo(
         sha256=sha256,
         phash=phash,
         quality_score=quality,
+        exif_datetime=exif_datetime,
     )
 
 
@@ -107,6 +109,67 @@ class ClusteringTests(unittest.TestCase):
         self.assertEqual(2, len(clusters))
         self.assertEqual(by_photo["a"], by_photo["b"])      # A and B together
         self.assertNotEqual(by_photo["a"], by_photo["c"])   # C is separate
+
+    def test_time_gate_splits_phash_match_taken_far_apart(self):
+        # Same pHash (distance 0), but taken 4 days apart — the capture-time
+        # gate keeps them in separate clusters (the reported false positive).
+        zero = "0" * 16
+        photos = [
+            make_photo("street", sha256="s1", phash=zero,
+                       exif_datetime="2025-12-27T17:10:00"),
+            make_photo("kayak", sha256="s2", phash=zero,
+                       exif_datetime="2025-12-23T10:48:00"),
+        ]
+        clusters, _ = build_clusters(photos, threshold=11)
+        self.assertEqual(2, len(clusters))
+        self.assertTrue(all(p.dup_type == DupType.NONE for p in photos))
+
+    def test_time_gate_keeps_phash_match_taken_moments_apart(self):
+        # Same scene seconds apart -> still grouped as near-duplicates.
+        zero = "0" * 16
+        photos = [
+            make_photo("a", sha256="s1", phash=zero,
+                       exif_datetime="2025-12-27T17:10:03"),
+            make_photo("b", sha256="s2", phash=zero,
+                       exif_datetime="2025-12-27T17:10:07"),
+        ]
+        clusters, members = build_clusters(photos, threshold=11)
+        self.assertEqual(1, len(clusters))
+        self.assertTrue(all(p.dup_type == DupType.NEAR for p in photos))
+
+    def test_time_gate_falls_back_when_a_timestamp_is_missing(self):
+        # Without both timestamps the gate can't judge, so pHash alone decides.
+        zero = "0" * 16
+        photos = [
+            make_photo("a", sha256="s1", phash=zero, exif_datetime=None),
+            make_photo("b", sha256="s2", phash=zero, exif_datetime=None),
+        ]
+        clusters, _ = build_clusters(photos, threshold=11)
+        self.assertEqual(1, len(clusters))
+
+    def test_time_gate_can_be_disabled(self):
+        zero = "0" * 16
+        photos = [
+            make_photo("a", sha256="s1", phash=zero,
+                       exif_datetime="2025-12-27T17:10:00"),
+            make_photo("b", sha256="s2", phash=zero,
+                       exif_datetime="2025-12-23T10:48:00"),
+        ]
+        clusters, _ = build_clusters(photos, threshold=11, max_time_gap_seconds=None)
+        self.assertEqual(1, len(clusters))  # gate off -> pHash groups them
+
+    def test_exact_duplicates_ignore_the_time_gate(self):
+        # Byte-identical files are duplicates no matter when they were shot;
+        # exact-dup grouping is by SHA and never time-gated.
+        photos = [
+            make_photo("a", sha256="same", phash="0" * 16,
+                       exif_datetime="2025-01-01T09:00:00"),
+            make_photo("b", sha256="same", phash="0" * 16,
+                       exif_datetime="2025-06-01T09:00:00"),
+        ]
+        clusters, members = build_clusters(photos, threshold=11)
+        self.assertEqual(1, len(clusters))
+        self.assertTrue(clusters[0].is_exact_dup_group)
 
     def test_member_order_uses_filepath_as_quality_tiebreaker(self):
         photos = [
