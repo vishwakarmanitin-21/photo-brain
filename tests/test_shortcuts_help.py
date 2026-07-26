@@ -9,6 +9,11 @@ from app.ui.dialogs import ShortcutsHelpDialog
 from app.ui.review_view import REVIEW_SHORTCUTS, ReviewView
 
 
+def _split_keys(entry: str) -> set[str]:
+    """The individual keys an entry documents, e.g. 'D / Del' -> {'D','Del'}."""
+    return {part.strip() for part in entry.split("/")}
+
+
 class ShortcutsHelpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -23,9 +28,14 @@ class ShortcutsHelpTests(unittest.TestCase):
             self.assertIn(desc, text)
 
     def test_core_verdict_keys_are_documented(self):
-        keys = {k for k, _ in REVIEW_SHORTCUTS}
+        # Match per-entry rather than exact labels: an entry may legitimately
+        # document aliases (e.g. "D / Del") without dropping the core key.
+        entries = [k for k, _ in REVIEW_SHORTCUTS]
         for k in ("K", "A", "D", "R"):
-            self.assertIn(k, keys)
+            self.assertTrue(
+                any(k in _split_keys(entry) for entry in entries),
+                f"verdict key {k!r} is not documented in {entries}",
+            )
         # The help entry itself must be listed so it's discoverable.
         self.assertTrue(any("F1" in k for k, _ in REVIEW_SHORTCUTS))
 

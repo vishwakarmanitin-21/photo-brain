@@ -8,7 +8,9 @@ from PySide6.QtWidgets import (
     QPushButton, QSizePolicy, QComboBox, QApplication, QSlider, QCheckBox,
     QLineEdit, QMessageBox, QFileDialog,
 )
-from PySide6.QtCore import Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer
+from PySide6.QtCore import (
+    Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer, QObject, QEvent,
+)
 from PySide6.QtGui import (
     QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor,
     QImageReader,
@@ -24,13 +26,16 @@ from app.ui.compare_dialog import CompareDialog
 REVIEW_SHORTCUTS = [
     ("K", "Keep the selected photo"),
     ("A", "Archive the selected photo"),
-    ("D", "Delete the selected photo (to Recycle Bin)"),
+    ("D / Del", "Delete the selected photo (to Recycle Bin)"),
     ("R", "Reset the selected photo to undecided"),
     ("C", "Compare this group's photos side by side"),
     ("Ctrl / Shift + click", "Select several photos; K/A/D then applies to all"),
-    ("← / →", "Previous / next photo in the group"),
+    ("← / →", "Previous / next photo in the grid"),
     ("↑ / ↓", "Move up / down a row in the photo grid"),
+    ("↑ / ↓ (in the group list)", "Previous / next group"),
+    ("Ctrl+↑ / Ctrl+↓", "Previous / next group, from anywhere"),
     ("J / PageDown / PageUp", "Next / previous group"),
+    ("Tab / Shift+Tab", "Move focus between the filters, group list and grid"),
     ("Ctrl+Z", "Undo your last decision"),
     ("Ctrl+Shift+Z", "Undo the last Apply (restore moved files)"),
     ("+ / − / 0", "Zoom in / out / reset"),
@@ -38,6 +43,49 @@ REVIEW_SHORTCUTS = [
     ("Ctrl+Enter", "Apply all changes"),
     ("F1 / ?", "Show this shortcuts list"),
 ]
+
+
+class _KeyPassthroughGuard(QObject):
+    """Stops the view-wide single-key shortcuts from stealing keys that the
+    focused control needs for its own navigation.
+
+    Qt asks the focused widget — via a ShortcutOverride event — whether it
+    wants a key before firing a matching shortcut. QLineEdit already claims
+    printable keys (so the search box was fine), but QComboBox and
+    QListWidget do not. That let the review's arrow shortcuts swallow group-
+    list navigation and, worse, let "D" fire a DELETE while the user was
+    merely changing a dropdown. Accepting the override here delivers the key
+    to the control instead of the shortcut.
+
+    Modifier combos (Ctrl+Z, Ctrl+Enter, Ctrl+arrows) are never claimed, so
+    they keep working from anywhere.
+    """
+
+    def __init__(self, keys=(), claim_text_keys: bool = False, parent=None):
+        super().__init__(parent)
+        self._keys = set(keys)
+        self._claim_text_keys = claim_text_keys
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.ShortcutOverride:
+            if event.modifiers() & (
+                Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier
+            ):
+                return False  # global combos stay global
+            if event.key() in self._keys:
+                event.accept()
+                return True
+            if self._claim_text_keys and event.text().isalnum():
+                event.accept()  # type-to-search, never a verdict
+                return True
+        return False
+
+
+# Keys a list/combo needs for its own navigation.
+_NAV_KEYS = (
+    Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End,
+    Qt.Key_PageUp, Qt.Key_PageDown,
+)
 
 log = logging.getLogger("photobrain.review_view")
 
@@ -493,6 +541,13 @@ class ThumbnailWidget(QFrame):
         self._delete_btn.setToolTip("Delete to Recycle Bin (shortcut: D)")
         self._delete_btn.clicked.connect(lambda: self._on_verdict_btn(Verdict.DELETE))
         btn_row.addWidget(self._delete_btn)
+
+        # These three are mouse affordances only: keyboard users have K/A/D.
+        # Leaving them in the tab chain would put 3 tab stops on EVERY photo
+        # (~1500 on a 500-photo batch), making Tab useless for reaching the
+        # filters and action bar.
+        for btn in (self._keep_btn, self._archive_btn, self._delete_btn):
+            btn.setFocusPolicy(Qt.NoFocus)
 
         layout.addLayout(btn_row)
 
@@ -1173,10 +1228,15 @@ class ReviewView(QWidget):
         sc("K", self._mark_keep)
         sc("A", self._mark_archive)
         sc("D", self._mark_delete)
+        sc(Qt.Key_Delete, self._mark_delete)  # the obvious key for deleting
         sc("R", self._mark_review)
         sc("J", self._next_cluster)
         sc(Qt.Key_PageDown, self._next_cluster)
         sc(Qt.Key_PageUp, self._prev_cluster)
+        # Explicit group navigation that works from anywhere, including while
+        # the grid has focus (plain Up/Down there move within the photo grid).
+        sc("Ctrl+Down", self._next_cluster)
+        sc("Ctrl+Up", self._prev_cluster)
         # Arrows navigate the photo grid itself (UX-12): Left/Right by one,
         # Up/Down by a full row.
         sc(Qt.Key_Right, self._select_next_photo)
@@ -1194,6 +1254,42 @@ class ReviewView(QWidget):
         sc("=", self._zoom_in)  # Also + without Shift
         sc("-", self._zoom_out)
         sc("0", lambda: self._zoom_slider.setValue(BASE_THUMB_SIZE))  # Reset
+
+        self._install_key_guards()
+
+    def _install_key_guards(self):
+        """Give focused controls back the keys they need (see
+        _KeyPassthroughGuard). Guards are kept on self so they stay alive."""
+        self._key_guards = []
+
+        def guard(widget, keys=_NAV_KEYS, claim_text_keys=False):
+            g = _KeyPassthroughGuard(keys, claim_text_keys, parent=self)
+            widget.installEventFilter(g)
+            self._key_guards.append(g)
+
+        # Group list: Up/Down must move between groups (the natural thing to
+        # try). Letters are NOT claimed, so K/A/D still act on the selected
+        # photo while browsing groups with the arrows.
+        guard(self._cluster_list)
+
+        # Filter/sort dropdowns: arrows change the value and letters
+        # type-to-search — neither may trigger a verdict.
+        for combo in (
+            self._face_filter, self._expr_filter, self._quality_filter,
+            self._dup_filter, self._event_filter, self._sort_combo,
+            self._view_combo,
+        ):
+            guard(combo, claim_text_keys=True)
+
+        # Search box (QLineEdit already claims text, arrows move the caret).
+        guard(self._search_box,
+              keys=(Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End),
+              claim_text_keys=True)
+
+        # Zoom slider: arrows nudge the value.
+        guard(self._zoom_slider,
+              keys=(Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right,
+                    Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1930,7 +2026,9 @@ class ReviewView(QWidget):
         else:
             self._selection_count_label.setText(
                 "Select several: Ctrl+click (or Shift+click a range), then "
-                "Keep / Archive / Delete them together.")
+                "Keep / Archive / Delete them together.   "
+                "Keyboard: arrows move · K/A/D decide · Ctrl+↑/↓ change group "
+                "· ? for all shortcuts")
             self._selection_count_label.setStyleSheet(
                 "font-size: 12px; color: #888;")
 
