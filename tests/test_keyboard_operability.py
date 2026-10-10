@@ -29,6 +29,10 @@ class KeyboardOperabilityTests(unittest.TestCase):
     def _view(self, n_clusters=3, per=3):
         rv = ReviewView()
         self.addCleanup(rv.deleteLater)
+        # Close each test's window: a shown window left from an earlier test
+        # keeps its timers (e.g. the resize reflow) and can disturb the next
+        # test's keyboard focus.
+        self.addCleanup(rv.close)
         clusters = [Cluster(id=f"c{i}", label=f"c{i}", member_count=per)
                     for i in range(n_clusters)]
         cp = {f"c{i}": [_photo(f"c{i}_p{j}", f"c{i}", 0.9 - 0.1 * j)

@@ -32,6 +32,9 @@ class GridReflowTests(unittest.TestCase):
     def test_widening_reflows_existing_tiles_and_rows_follow(self):
         rv = ReviewView()
         self.addCleanup(rv.deleteLater)
+        # Close explicitly: a shown window left behind can take keyboard focus
+        # from later tests that type into QApplication.focusWidget().
+        self.addCleanup(rv.close)
         narrow = rv.minimumSizeHint().width()
         rv.resize(narrow, 700)
         rv.show()

@@ -1380,6 +1380,11 @@ class ReviewView(QWidget):
         super().showEvent(event)
         # Take focus so the widget-scoped shortcuts are active immediately.
         self.setFocus()
+        # The grid may have been laid out before the window had its real
+        # width. Reflow on the next event-loop turn (once the layout has
+        # settled) instead of 120 ms later — otherwise the grid visibly jumps
+        # from a few columns to many just after opening (UX-23).
+        QTimer.singleShot(0, self._reflow_if_needed)
 
     # ── Zoom helper methods ──────────────────────────────
 
