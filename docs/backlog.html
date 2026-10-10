@@ -700,7 +700,7 @@
     <li><b>RANK-10</b> show why each pick was made</li>
     <li><b>RANK-09</b> local aesthetic model + <b>CLUST-04</b> same-moment grouping — after Nitin's size decision</li>
     <li>Then resume launch: ADOPT-04/05/07, with the measured agreement number as the headline</li>
-    <li><b>Speed &amp; image quality (10 Oct audit):</b> quick wins <b>shipped 10 Oct</b> — UX-17 Compare freeze, UX-18 arrow-key lag, UX-16 + PERF-08 upright thumbnails ~3-4× faster, UX-20 Compare, UX-23 resize reflow, PERF-11 autosave, PERF-07 search debounce (half). Next: <b>UX-19</b> sharp images on scaled screens and <b>FEAT-07</b> a full-size view with zoom &amp; pan</li>
+    <li><b>Speed &amp; image quality (10 Oct audit):</b> shipped 10 Oct — UX-16/17/18/19/20/23, PERF-08/11, <b>FEAT-07 full-size view with 100% zoom &amp; pan</b> and linked Compare zoom; PERF-07 and PERF-09 half done. Next: <b>UX-24</b> progress for Apply/Undo/Export, <b>UX-22</b> fit on laptop screens</li>
   </ol>
     </div>
     <div class="summary-card needs">
@@ -1563,7 +1563,7 @@ const ITEMS = [
   {
     id: "UX-19",
     title: "Photos look soft on high-DPI screens (including Nitin's 125% display): no image path accounts for screen scaling",
-    status: "open",
+    status: "shipped",
     priority: "P1",
     severity: "High",
     category: "ux",
@@ -1575,6 +1575,10 @@ const ITEMS = [
     summary: "No code reads the screen's devicePixelRatio (0 matches in app/, confirmed 10 Oct). Tiles are scaled to logical pixels from a 200 px thumbnail (app/core/thumbnails.py:23; review_view.py:591-594); previews are generated at `display_size` logical px (review_view.py:1480, thumbnails.py:115); hover 800 logical (review_view.py:376); compare 460 (compare_dialog.py:128). Measured by the 10-Oct UX audit: at 1.5× scaling the tile pixmap is 180×135 at ratio 1.0, i.e. upscaled 1.5×; Nitin's screen reports 2048×1152 logical at ratio 1.25. UX-13's 'High-DPI scaling is on by default in Qt 6' covers layout, not images — that part of UX-13 is incomplete. Fix: request size × devicePixelRatio, `setDevicePixelRatio` on pixmaps, raise THUMB_SIZE to ~320.",
     files: ["app/core/thumbnails.py:23,115", "app/ui/review_view.py:376,591-594,1480", "app/ui/compare_dialog.py:128"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "512d4ac",
+    updatedAt: "2026-10-10",
+    shipNote: "Tiles, zoom previews, the hover overlay, Compare and the label window are prepared at screen pixels (points x devicePixelRatio) and tagged with the ratio. MEASURED on Nitin's real screen (2048x1152 logical at 1.25): a 180-pt tile draws 225x168 px instead of 180x135 stretched. Thumbnails 200 -> 320 px (cache format u2; old files pruned); a fair warm benchmark on 8 real 9 MP photos shows no slowdown (320 px ~92-104 ms vs 200 px ~88-115 ms) because Image.draft is now asked for the long side only. Follow-up fix 9aa1f1f: the first reflow happens as soon as review is shown.",
   },
   {
     id: "UX-20",
@@ -1612,7 +1616,7 @@ const ITEMS = [
     files: ["app/ui/review_view.py:315-321,361,388,702-709,1506"],
     createdAt: "2026-10-10",
     updatedAt: "2026-10-10",
-    progress: "PARTLY ADDRESSED 2026-10-10 (d94ac45): the hover preview now uses the shared loader, so iPhone (HEIC) photos are decoded at reduced size and upright instead of a full Pillow decode. Still open: decode off the UI thread + cache, Alt pressed mid-hover, second-monitor placement, dark-mode frame.",
+    progress: "PARTLY ADDRESSED 2026-10-10: shared loader makes HEIC hovers upright and reduced-size (d94ac45); the overlay is decoded at screen pixels, placed on the monitor under the cursor and kept off the taskbar (512d4ac). Still open: decode off the UI thread + cache, Alt pressed mid-hover, dark-mode frame.",
   },
   {
     id: "UX-22",
@@ -1648,7 +1652,7 @@ const ITEMS = [
     shippedAt: "2026-10-10",
     shippedBy: "e38f55c",
     updatedAt: "2026-10-10",
-    shipNote: "A resize watcher on the grid reflows the existing tiles (no re-creation, no image reload) when a different column count fits; Up/Down uses the columns actually laid out. Test: widen -> more columns, same tile objects, Down moves one row.",
+    shipNote: "A resize watcher on the grid reflows the existing tiles (no re-creation, no image reload) when a different column count fits; Up/Down uses the columns actually laid out. Follow-up 9aa1f1f: the first reflow happens as soon as review is shown (was 120 ms later — a visible jump from a few columns to many, which also made keyboard tests flaky: 6 of 30 runs before the fix, 0 of 40 after).",
   },
   {
     id: "UX-24",
@@ -1934,7 +1938,7 @@ const ITEMS = [
   {
     id: "FEAT-07",
     title: "No way to look at a photo full size: add a single-photo view with fit / 100% / pan and mouse-wheel zoom",
-    status: "open",
+    status: "shipped",
     priority: "P1",
     severity: "High",
     category: "feature",
@@ -1948,6 +1952,9 @@ const ITEMS = [
     createdAt: "2026-10-10",
     updatedAt: "2026-10-10",
     reauditNote: "Also carries Compare's linked zoom/pan (moved here from UX-20, 2026-10-10): one zoom/pan component should serve both the single-photo view and Compare.",
+    shippedAt: "2026-10-10",
+    shippedBy: "2f97e71",
+    shipNote: "Space / Enter / double-click opens a full-window viewer: fit <-> 100% (one photo pixel per screen pixel), wheel zoom around the pointer, drag to pan, Left/Right through the grid, K/A/D/R + Ctrl+Z through the review screen's own verdict and undo, O opens in Windows. Fit never enlarges a small photo. Compare uses the same zoom/pan panel, linked across photos (by zoom relative to fit, so copies of different sizes show the same spot). Ctrl+wheel resizes grid tiles. MEASURED on real photos: viewer opens 165 ms, first image 0.44 s, next photo 2 ms (prefetched); Compare linked 100% across mixed sizes, full resolution in 0.35 s. README updated (cfea6c5).",
   },
   {
     id: "PERF-01",
@@ -2085,7 +2092,7 @@ const ITEMS = [
   {
     id: "PERF-09",
     title: "Zoomed previews are cached per exact zoom value and the in-memory cache is thrown away on every zoom and group switch",
-    status: "open",
+    status: "in-progress",
     priority: "P2",
     severity: "Medium",
     category: "performance",
@@ -2097,6 +2104,8 @@ const ITEMS = [
     summary: "Preview files are named `{key}_{display_size}.jpg` (app/core/thumbnails.py:98-107 — confirmed 10 Oct), so every slider value 201-800 is a new file and a new full decode (keyboard steps alone give 30 sizes); pruning removes only photos no longer in the library, never old sizes. The 10-Oct UX audit also found `_preview_pixmaps` cleared on every zoom change (app/ui/review_view.py:1386-1388) and on every group switch, because `ordered is not self._current_photos` is always true (:1865-1866). Fix: fixed size steps (e.g. 400 / 800 / 1600 device px), scale down from the nearest larger step, memory cache keyed by (sha, step). Follow-up to PERF-05.",
     files: ["app/core/thumbnails.py:98-107", "app/ui/review_view.py:1386-1388,1865-1866"],
     createdAt: "2026-10-10",
+    updatedAt: "2026-10-10",
+    progress: "PARTLY SHIPPED 2026-10-10 (512d4ac, with UX-19): previews come in fixed pixel steps (480/800/1200/1600/2400) instead of one cache file and decode per slider value; decoded previews survive zoom changes within a step; the u2 cache format retired the old odd-sized files. REMAINING: previews are still dropped on every group switch (ordered is not _current_photos), and the in-memory preview cache is unbounded per group.",
   },
   {
     id: "PERF-10",
