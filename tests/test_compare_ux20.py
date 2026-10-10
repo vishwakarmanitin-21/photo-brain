@@ -46,11 +46,9 @@ class CompareUx20Tests(unittest.TestCase):
             dlg = CompareDialog(photos, image_px=200)
             self.addCleanup(dlg.deleteLater)
             # Opens immediately with placeholders — nothing decoded on the UI thread.
-            self.assertTrue(all(p._image.text() == "Loading…" for p in dlg._panels))
-            self.assertTrue(self._wait(lambda: all(p._image.pixmap() is not None
-                                                   and not p._image.pixmap().isNull()
-                                                   for p in dlg._panels)))
-            pm = dlg._panels[0]._image.pixmap()
+            self.assertTrue(all(not p.view.has_image() for p in dlg._panels))
+            self.assertTrue(self._wait(lambda: all(p.view.has_image() for p in dlg._panels)))
+            pm = dlg._panels[0].view._pixmap
             self.assertLess(pm.width(), pm.height())   # portrait, not sideways
 
     def test_unreadable_file_says_so(self):
@@ -60,7 +58,7 @@ class CompareUx20Tests(unittest.TestCase):
                 fh.write(b"not an image")
             dlg = CompareDialog([_photo(bad, "x"), _photo(_portrait(d, "ok.jpg"), "y")], image_px=150)
             self.addCleanup(dlg.deleteLater)
-            self.assertTrue(self._wait(lambda: dlg._panels[0]._image.text() == "(preview unavailable)"))
+            self.assertTrue(self._wait(lambda: dlg._panels[0].view._message == "(preview unavailable)"))
 
     def test_heic_style_fallback_through_pillow_is_upright(self):
         # A format Qt has no plugin for goes through Pillow; simulate with a

@@ -5,11 +5,12 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QWidget, QFrame, QDialogButtonBox, QApplication,
 )
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
 
 from app.core.models import Photo, Verdict
-from app.ui.image_loading import load_bounded_image
+from app.ui.image_loading import load_bounded_image, load_full_image, upright_size
+from app.ui.zoom_pan_view import ZoomPanView
 
 # Panel image size limits (logical px). The actual size follows the screen:
 # up to four photos fit side by side without scrolling (UX-20).
@@ -26,20 +27,21 @@ def fit_image_px(count: int, avail_w: int, avail_h: int) -> int:
 
 
 class _Loaded(QObject):
-    done = Signal(str, QImage)  # photo id, image
+    done = Signal(str, bool, QImage)  # photo id, full resolution?, image
 
 
 class _LoadTask(QRunnable):
-    """Decode one photo off the UI thread: bounded, upright, any format."""
+    """Decode one photo off the UI thread: bounded (or full), upright, any format."""
 
-    def __init__(self, photo: Photo, max_dim: int, relay: _Loaded):
+    def __init__(self, photo: Photo, max_dim: int, relay: _Loaded, full: bool = False):
         super().__init__()
-        self.photo, self.max_dim, self.relay = photo, max_dim, relay
+        self.photo, self.max_dim, self.relay, self.full = photo, max_dim, relay, full
 
     def run(self):
-        image = load_bounded_image(self.photo.filepath, self.max_dim)
+        path = self.photo.filepath
+        image = load_full_image(path) if self.full else load_bounded_image(path, self.max_dim)
         try:
-            self.relay.done.emit(self.photo.id, image)
+            self.relay.done.emit(self.photo.id, self.full, image)
         except RuntimeError:
             pass  # the dialog closed before this decode finished — nothing to update
 
@@ -74,11 +76,10 @@ class _PhotoPanel(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
 
-        # Large image, filled in by a background decode (set_image). It used
-        # to be a full-resolution QPixmap(path) on the UI thread: slow, blank
-        # for HEIC, and sideways for phone portraits (UX-20).
-        self._image = QLabel("Loading…")
-        self._image.setAlignment(Qt.AlignCenter)
+        # Zoomable image, filled in by a background decode (set_image) — never
+        # decoded on the UI thread (UX-20). Zoom/pan here is mirrored onto the
+        # other photos by the dialog (FEAT-07).
+        self._image = ZoomPanView()
         self._image.setFixedSize(image_px, image_px)
         layout.addWidget(self._image)
 
@@ -133,19 +134,19 @@ class _PhotoPanel(QFrame):
 
         self._refresh()
 
-    def set_image(self, image: QImage):
+    @property
+    def view(self) -> ZoomPanView:
+        return self._image
+
+    def set_image(self, image: QImage, full: bool = False):
         if image.isNull():
-            self._image.setText("(preview unavailable)")
+            if not full:
+                self._image.set_message("(preview unavailable)")
             return
-        # Decoded at screen pixels (size x devicePixelRatio) so it stays sharp
-        # on a scaled display; never upscaled beyond the original.
-        pixmap = QPixmap.fromImage(image)
-        ratio = self.devicePixelRatioF()
-        target = int(self._image_px * ratio)
-        if max(pixmap.width(), pixmap.height()) > target:
-            pixmap = pixmap.scaled(target, target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        pixmap.setDevicePixelRatio(ratio)
-        self._image.setPixmap(pixmap)
+        # Decoded at screen pixels (panel size x devicePixelRatio) so it is
+        # sharp on a scaled display; the full-resolution decode replaces it
+        # without moving the view when the user zooms in.
+        self._image.set_image(image, upright_size(self.photo.filepath), keep_view=full)
 
     def _set(self, verdict: Verdict):
         self.photo.verdict = verdict
@@ -186,7 +187,8 @@ class CompareDialog(QDialog):
         layout = QVBoxLayout(self)
         header = QLabel(
             "Pick the keeper — set each photo, then close. "
-            "Ctrl+Z in the review screen undoes it.")
+            "Ctrl+Z in the review screen undoes it. Wheel to zoom, drag to pan, "
+            "double-click for 100% — every photo follows, so you compare the same spot.")
         header.setStyleSheet("color: #555;")
         layout.addWidget(header)
         if note:
@@ -213,12 +215,32 @@ class CompareDialog(QDialog):
         for p in photos:
             QThreadPool.globalInstance().start(_LoadTask(p, decode_px, self._relay))
 
+        # Linked zoom/pan (FEAT-07): a change in one photo is mirrored on the
+        # others; zooming past the loaded resolution fetches full-size decodes.
+        self._full_requested = False
+        for panel in self._panels:
+            panel.view.view_changed.connect(
+                lambda z, x, y, src=panel: self._mirror_view(src, z, x, y))
+            panel.view.wants_full_resolution.connect(self._load_full_resolution)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
 
-    def _on_loaded(self, photo_id: str, image: QImage):
+    def _mirror_view(self, source, relative_zoom: float, cx: float, cy: float):
+        for panel in self._panels:
+            if panel is not source:
+                panel.view.set_view(relative_zoom, cx, cy)
+
+    def _load_full_resolution(self):
+        if self._full_requested:
+            return
+        self._full_requested = True
+        for panel in self._panels:
+            QThreadPool.globalInstance().start(_LoadTask(panel.photo, 0, self._relay, full=True))
+
+    def _on_loaded(self, photo_id: str, full: bool, image: QImage):
         for panel in self._panels:
             if panel.photo.id == photo_id:
-                panel.set_image(image)
+                panel.set_image(image, full=full)

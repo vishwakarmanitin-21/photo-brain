@@ -54,3 +54,37 @@ def _load_via_pil(filepath: str, max_dim: int) -> QImage:
                           QImage.Format_RGB888).copy()
     except Exception:
         return QImage()
+
+
+# EXIF orientations 5-8 rotate by 90 degrees: width and height swap.
+_SWAPS_AXES = {5, 6, 7, 8}
+
+
+def upright_size(filepath: str):
+    """The photo's full size as displayed (after EXIF rotation), read from the
+    header only. Returns a QSize, invalid if unreadable."""
+    from PySide6.QtCore import QSize
+    reader = QImageReader(filepath)
+    size = reader.size()
+    if size.isValid():
+        transform = reader.transformation()
+        # Qt reports rotations as transformation flags; a 90-degree turn swaps axes.
+        from PySide6.QtGui import QImageIOHandler
+        if transform & QImageIOHandler.Transformation.TransformationRotate90:
+            size = QSize(size.height(), size.width())
+        return size
+    try:
+        from PIL import Image
+        from app.core import image_formats  # noqa: F401  (registers HEIC)
+        with Image.open(filepath) as img:
+            w, h = img.size
+            if img.getexif().get(0x0112) in _SWAPS_AXES:
+                w, h = h, w
+            return QSize(w, h)
+    except Exception:
+        return QSize()
+
+
+def load_full_image(filepath: str) -> QImage:
+    """The whole photo at full resolution, upright (for 100% viewing)."""
+    return load_bounded_image(filepath, 1 << 20)

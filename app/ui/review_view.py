@@ -11,16 +11,17 @@ from PySide6.QtWidgets import (
     QLineEdit, QMessageBox, QFileDialog,
 )
 from PySide6.QtCore import (
-    Signal, Qt, Slot, QUrl, QPoint, QTimer, QObject, QEvent,
+    Signal, Qt, Slot, QPoint, QTimer, QObject, QEvent,
 )
 from PySide6.QtGui import (
-    QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor,
+    QPixmap, QKeySequence, QColor, QShortcut, QCursor,
 )
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.scoring import is_low_quality
 from app.ui.dialogs import ShortcutsHelpDialog
 from app.ui.compare_dialog import CompareDialog
+from app.ui.photo_viewer import PhotoViewer
 from app.ui.image_loading import load_bounded_pixmap  # shared, upright, any format
 
 # Single source of truth for the review shortcuts — used to bind them AND
@@ -31,6 +32,7 @@ REVIEW_SHORTCUTS = [
     ("D / Del", "Delete the selected photo (to Recycle Bin)"),
     ("R", "Reset the selected photo to undecided"),
     ("C", "Compare side by side: the selected photos, or this group (up to 8)"),
+    ("Space / Enter / double-click", "View the photo full size — zoom to 100%, pan, ←/→, K/A/D"),
     ("Ctrl / Shift + click", "Select several photos; K/A/D then applies to all"),
     ("← / →", "Previous / next photo in the grid"),
     ("↑ / ↓", "Move up / down a row in the photo grid"),
@@ -41,6 +43,7 @@ REVIEW_SHORTCUTS = [
     ("Ctrl+Z", "Undo your last decision"),
     ("Ctrl+Shift+Z", "Undo the last Apply (restore moved files)"),
     ("+ / − / 0", "Zoom in / out / reset"),
+    ("Ctrl + mouse wheel", "Make the photo tiles bigger / smaller"),
     ("Alt + hover", "Full-size preview of a photo"),
     ("Ctrl+Enter", "Apply all changes"),
     ("F1 / ?", "Show this shortcuts list"),
@@ -57,6 +60,23 @@ class _ResizeWatcher(QObject):
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Resize:
             self._callback()
+        return False
+
+
+class _CtrlWheelZoom(QObject):
+    """Ctrl + mouse wheel over the grid changes the tile size (FEAT-07);
+    a plain wheel still scrolls."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Wheel and event.modifiers() & Qt.ControlModifier:
+            steps = event.angleDelta().y() / 120
+            if steps:
+                self._callback(steps)
+            return True
         return False
 
 
@@ -101,6 +121,9 @@ _NAV_KEYS = (
     Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End,
     Qt.Key_PageUp, Qt.Key_PageDown,
 )
+# Space/Enter open the full-size viewer from the grid; a focused dropdown or
+# the search box needs them for itself (open the list, confirm the search).
+_ACTIVATE_KEYS = (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter)
 
 log = logging.getLogger("photobrain.review_view")
 
@@ -456,6 +479,7 @@ class ThumbnailWidget(QFrame):
     clicked = Signal(str)  # photo_id
     verdict_changed = Signal(str, str)  # photo_id, verdict_value
     hovered = Signal(str, QPoint)  # photo_id, cursor_pos
+    open_requested = Signal(str)   # photo_id — double-click: view full size (FEAT-07)
     unhovered = Signal()
 
     def __init__(self, photo: Photo, parent=None, is_best: bool = False):
@@ -753,10 +777,9 @@ class ThumbnailWidget(QFrame):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        """Open the full photo in the system default viewer."""
-        filepath = self.photo.filepath
-        if os.path.isfile(filepath):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(filepath))
+        """View the photo full size inside the app (FEAT-07). The Windows
+        viewer is still one key away there (O)."""
+        self.open_requested.emit(self.photo.id)
         super().mouseDoubleClickEvent(event)
 
     def enterEvent(self, event):
@@ -1109,6 +1132,9 @@ class ReviewView(QWidget):
         self._grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._scroll.setWidget(self._grid_container)
         self._scroll.viewport().installEventFilter(self._resize_watcher)
+        self._wheel_zoom = _CtrlWheelZoom(
+            lambda steps: self._zoom_in() if steps > 0 else self._zoom_out(), self)
+        self._scroll.viewport().installEventFilter(self._wheel_zoom)
 
         splitter.addWidget(self._scroll)
         splitter.setStretchFactor(0, 0)
@@ -1334,6 +1360,9 @@ class ReviewView(QWidget):
         sc("F1", self._show_shortcuts)
         sc("?", self._show_shortcuts)
         sc("C", self._open_compare)
+        sc(Qt.Key_Space, self._open_viewer)
+        sc(Qt.Key_Return, self._open_viewer)
+        sc(Qt.Key_Enter, self._open_viewer)
         # Zoom shortcuts
         sc("+", self._zoom_in)
         sc("=", self._zoom_in)  # Also + without Shift
@@ -1364,11 +1393,11 @@ class ReviewView(QWidget):
             self._dup_filter, self._event_filter, self._sort_combo,
             self._view_combo,
         ):
-            guard(combo, claim_text_keys=True)
+            guard(combo, keys=_NAV_KEYS + _ACTIVATE_KEYS, claim_text_keys=True)
 
         # Search box (QLineEdit already claims text, arrows move the caret).
         guard(self._search_box,
-              keys=(Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End),
+              keys=(Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End) + _ACTIVATE_KEYS,
               claim_text_keys=True)
 
         # Zoom slider: arrows nudge the value.
@@ -1482,6 +1511,39 @@ class ReviewView(QWidget):
         self._update_cluster_list_item()
         self.review_state_changed.emit()
 
+    def _open_viewer(self, photo_id: str = None):
+        """Full-size view of the selected (or given) photo, stepping through
+        the grid in its displayed order (FEAT-07)."""
+        photos = self._get_current_photos()
+        if not photos:
+            return
+        target = photo_id if isinstance(photo_id, str) else self._selected_photo_id
+        index = next((i for i, p in enumerate(photos) if p.id == target), 0)
+        self._hide_hover_preview()
+        viewer = PhotoViewer(photos, index, on_verdict=self._viewer_set_verdict,
+                             on_undo=self._viewer_undo, parent=self)
+        viewer.exec()
+        # Leave the grid where the user left the viewer.
+        last = viewer.current_photo().id
+        if last in self._thumb_widgets:
+            self._select_photo(last)
+
+    def _viewer_set_verdict(self, photo: Photo, verdict: Verdict):
+        """A decision made in the viewer: same effect, counts and undo step as
+        pressing K/A/D on the tile."""
+        photo.user_override = True
+        widget = self._thumb_widgets.get(photo.id)
+        if widget:
+            widget.update_verdict(verdict)
+        else:
+            photo.verdict = verdict
+        self._update_global_counts()
+        self._update_cluster_list_item()
+        self.review_state_changed.emit()
+
+    def _viewer_undo(self):
+        self._undo_verdict()
+
     def _zoom_in(self):
         """Increase thumbnail size."""
         current = self._zoom_slider.value()
@@ -1589,6 +1651,7 @@ class ReviewView(QWidget):
             widget.clicked.connect(self._on_photo_clicked)
             widget.verdict_changed.connect(self._on_thumb_verdict_changed)
             widget.hovered.connect(self._show_hover_preview)
+            widget.open_requested.connect(self._open_viewer)
             widget.unhovered.connect(self._hide_hover_preview)
 
             # Add to grid
