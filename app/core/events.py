@@ -13,29 +13,39 @@ from app.core import image_formats  # noqa: F401
 
 log = logging.getLogger("photobrain.events")
 
-# EXIF tag IDs for date/time
-_DATE_TAGS = [
+# EXIF tag IDs for date/time, in preference order. DateTimeOriginal and
+# DateTimeDigitized live in the Exif sub-IFD (0x8769); DateTime (306) lives in
+# the main IFD0 block and records when the file was last SAVED — edits and
+# re-exports change it. getexif() returns only IFD0, so the capture-time tags
+# must be read from the sub-IFD explicitly (CLUST-05: on 12 of 12 sampled
+# phone photos they were only there, and the code had silently fallen back
+# to DateTime).
+_EXIF_IFD = 0x8769
+_CAPTURE_TAGS = [
     ExifBase.DateTimeOriginal,   # 36867
     ExifBase.DateTimeDigitized,  # 36868
-    ExifBase.DateTime,           # 306
 ]
+_SAVED_TAG = ExifBase.DateTime   # 306 — last resort
 
 _EXIF_DATE_FORMAT = "%Y:%m:%d %H:%M:%S"
 
 
 def extract_exif_datetime(filepath: str) -> Optional[str]:
-    """Extract the earliest date/time from EXIF data.
+    """When the photo was taken, from EXIF: DateTimeOriginal, then
+    DateTimeDigitized, then (last resort) DateTime.
 
     Returns ISO 8601 string or None if no date found.
     """
     try:
         with Image.open(filepath) as img:
             exif = img.getexif()
+            sub_ifd = exif.get_ifd(_EXIF_IFD) if exif else {}
         if not exif:
             return None
 
-        for tag_id in _DATE_TAGS:
-            val = exif.get(tag_id)
+        candidates = [sub_ifd.get(tag) or exif.get(tag) for tag in _CAPTURE_TAGS]
+        candidates.append(exif.get(_SAVED_TAG))
+        for val in candidates:
             if val and isinstance(val, str):
                 try:
                     dt = datetime.strptime(val.strip(), _EXIF_DATE_FORMAT)

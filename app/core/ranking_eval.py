@@ -363,6 +363,12 @@ def scorer_fingerprint(repo_root: str) -> str:
 
 # ───────────────────────────── indexing a photo root ─────────────────────────────
 
+# Bump when extract_exif_datetime changes what it returns, so cached capture
+# times from the old reader are re-read. 2 = Exif sub-IFD DateTimeOriginal (CLUST-05).
+DATE_CACHE_FORMAT = 2
+_DATE_CACHE_KEY = "__format__"
+
+
 def date_cache_path(root: str) -> str:
     """Capture-time cache for a root, kept OUT of the photo folder (it is
     rebuildable, so it does not need OneDrive backup like the labels do)."""
@@ -390,9 +396,13 @@ def index_root(root: str, progress_cb=None, cancel_check=None,
                 cache = json.load(fh)
         except (OSError, ValueError):
             cache = {}
+    # Times read by an older date reader are not reused (CLUST-05 changed
+    # which EXIF field is read).
+    if cache.get(_DATE_CACHE_KEY) != DATE_CACHE_FORMAT:
+        cache = {}
 
     files = collect_files(root)
-    entries, fresh = [], {}
+    entries, fresh = [], {_DATE_CACHE_KEY: DATE_CACHE_FORMAT}
     for i, path in enumerate(files):
         if cancel_check and cancel_check():
             return None
