@@ -2541,7 +2541,7 @@ const ITEMS = [
     shippedAt: "2026-10-10",
     shippedBy: "b45895d",
     updatedAt: "2026-10-10",
-    shipNote: "Reads DateTimeOriginal / DateTimeDigitized from the Exif sub-IFD, IFD0 DateTime only as a last resort; the ranking label index re-reads dates cached by the old reader. Tests include an edited photo whose saved date differs from its taken date.",
+    shipNote: "Reads DateTimeOriginal / DateTimeDigitized from the Exif sub-IFD, IFD0 DateTime only as a last resort; the ranking label index re-reads dates cached by the old reader. Tests include an edited photo whose saved date differs from its taken date. MEASURED on Nitin's Camera Roll after the fix (8,490 photos re-indexed in 268 s): capture time changed for 3 photos, all previously undated (no IFD0 DateTime) and now dated from DateTimeOriginal; burst pages 1,831 -> 1,832. Small here because the library is unedited phone originals; edited or exported photos are where it matters.",
   },
 ];
 
