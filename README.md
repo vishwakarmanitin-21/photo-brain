@@ -115,7 +115,11 @@ Each thumbnail shows its decision as a coloured border **and** a corner letter b
 - **Red / `D`** = DELETE
 - **Gray / `?`** = undecided (REVIEW)
 
-**Zoom Controls:** Drag the zoom slider (120–800px) or use the `+`/`-` keys to adjust thumbnail size; `0` resets to the default. The grid reflows its column count to fit, and above the cached thumbnail size it loads high-quality images from the originals.
+**Zoom Controls:** Drag the zoom slider (120–800px), hold `Ctrl` and turn the mouse wheel over the grid, or use the `+`/`-` keys to adjust thumbnail size; `0` resets to the default. The grid reflows its column count to fit (also when you resize the window), and above the cached thumbnail size it loads high-quality images from the originals. Images are prepared for your screen's scaling (125%, 150%…), so they are drawn sharp, not stretched.
+
+**Full-size view:** press `Space` or `Enter`, or double-click a photo, to see it filling the window. Double-click (or `Space`) toggles between *fit* and *100%* — one photo pixel per screen pixel, the honest way to check focus and eyes — the mouse wheel zooms around the pointer and dragging pans. `←`/`→` step through the grid, `K`/`A`/`D`/`R` decide and `Ctrl+Z` undoes, just like in the grid; `O` opens the photo in the Windows viewer and `Esc` returns to the grid on the photo you were last looking at. A photo smaller than the screen is shown at its true size, never enlarged.
+
+**Compare:** `C` shows the photos you selected (`Ctrl`+click) — or the current group — side by side, up to 8. Zoom or pan one and the others follow, so you compare the same spot on every shot.
 
 **Multi-select:** `Ctrl`+click toggles individual photos, `Shift`+click selects a range, or hit **Select All Shown**. A **selection bar** under the grid then shows **"N photos selected"** with one-click **Keep / Archive / Delete Selected** (and **Clear**); the `K`/`A`/`D` keys and the on-card buttons apply to the whole selection too. It all undoes as a single step.
 
@@ -164,9 +168,11 @@ Changed your mind? Click "Undo Last Apply" to restore all moved files to their o
 | `Up` / `Down` | Move up / down a row in the photo grid |
 | `J` / `PageDown` / `PageUp` | Next / previous group |
 | `Ctrl` / `Shift` + click | Select several photos at once |
-| `C` | Compare the group side by side |
+| `C` | Compare the selected photos (or the group) side by side, with linked zoom |
+| `Space` / `Enter` / double-click | View the photo full size: 100% zoom, pan, `←`/`→`, `K`/`A`/`D` |
 | `+` / `=` / `-` | Zoom in / out |
 | `0` | Reset zoom to default |
+| `Ctrl` + mouse wheel | Bigger / smaller photo tiles |
 | `Alt` + hover | Show full-size preview |
 | `Ctrl+Z` | Undo your last decision |
 | `Ctrl+Shift+Z` | Undo the last Apply (restore moved files) |
@@ -179,7 +185,7 @@ Accessible from the home screen:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| How to group photos | Similar shots | Plain-language preset for how aggressively near-duplicates are grouped: *Only near-identical* (8), *Similar shots* (17), or *Loose grouping* (24). The exact pHash Hamming-distance threshold (1–30) is available under **Advanced**. |
+| How to group photos | Similar shots | Plain-language preset for how aggressively near-duplicates are grouped: *Only near-identical* (8), *Similar shots* (11), or *Loose grouping* (24). The exact pHash Hamming-distance threshold (1–30) is available under **Advanced**. |
 | Keep per group | 2 | Number of best photos to suggest keeping per group. |
 | Event Gap (hours) | 4.0 | Time gap between EXIF timestamps to split into separate events. |
 | Face Detection | On | Enable/disable face detection and expression analysis. |
