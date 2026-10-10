@@ -125,7 +125,8 @@ class CompareDialog(QDialog):
     the caller refreshes the review grid on close.
     """
 
-    def __init__(self, photos: list[Photo], parent=None, image_px: int = 460):
+    def __init__(self, photos: list[Photo], parent=None, image_px: int = 460,
+                 note: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Compare photos")
         self.setMinimumSize(min(1200, image_px * len(photos) + 80), image_px + 220)
@@ -139,6 +140,10 @@ class CompareDialog(QDialog):
             "Ctrl+Z in the review screen undoes it.")
         header.setStyleSheet("color: #555;")
         layout.addWidget(header)
+        if note:
+            notice = QLabel(note)
+            notice.setStyleSheet("color: #b45309;")
+            layout.addWidget(notice)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

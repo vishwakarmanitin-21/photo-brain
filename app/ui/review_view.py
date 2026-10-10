@@ -28,7 +28,7 @@ REVIEW_SHORTCUTS = [
     ("A", "Archive the selected photo"),
     ("D / Del", "Delete the selected photo (to Recycle Bin)"),
     ("R", "Reset the selected photo to undecided"),
-    ("C", "Compare this group's photos side by side"),
+    ("C", "Compare side by side: the selected photos, or this group (up to 8)"),
     ("Ctrl / Shift + click", "Select several photos; K/A/D then applies to all"),
     ("← / →", "Previous / next photo in the grid"),
     ("↑ / ↓", "Move up / down a row in the photo grid"),
@@ -243,6 +243,35 @@ VIEW_OPTIONS = [VIEW_GROUPS, VIEW_ALL]
 # libraries). When it bites, the lowest-quality tail is what's dropped from
 # the grid — it is still counted and still swept by batch actions.
 MAX_FLAT_GRID = 600
+
+# Compare shows photos side by side at a size where focus and eyes can be
+# judged; past this many they are too small to compare and slow to open.
+MAX_COMPARE = 8
+
+
+def compare_targets(shown: list, selected_ids: set, view_is_one_group: bool):
+    """Which photos Compare should open, plus a note for the user (UX-17).
+
+    Two or more selected photos win; otherwise the current group — but never
+    the whole "All photos" view, which can hold 600 photos. Capped at
+    MAX_COMPARE, in grid order. Returns ([], reason) when there is nothing
+    sensible to compare.
+    """
+    picked = [p for p in shown if p.id in selected_ids]
+    if len(picked) >= 2:
+        base = picked
+    elif view_is_one_group and len(shown) >= 2:
+        base = shown
+    elif view_is_one_group:
+        return [], "This group has only one photo — nothing to compare."
+    else:
+        return [], (f"Select 2 to {MAX_COMPARE} photos (Ctrl+click) to compare "
+                    "them side by side.")
+    if len(base) > MAX_COMPARE:
+        return base[:MAX_COMPARE], (
+            f"Showing the first {MAX_COMPARE} of {len(base)} photos. "
+            "Select the ones you want (Ctrl+click) to choose which.")
+    return base, ""
 
 
 def sort_photos(photos: list, mode: str) -> list:
@@ -777,7 +806,8 @@ class ReviewView(QWidget):
 
         self._compare_btn = QPushButton("⇆ Compare")
         self._compare_btn.setToolTip(
-            "Compare this group's photos side by side (C)")
+            "Compare side by side: the photos you selected (Ctrl+click), "
+            f"or this group — up to {MAX_COMPARE} (C)")
         self._compare_btn.clicked.connect(self._open_compare)
         toolbar.addWidget(self._compare_btn)
 
@@ -1352,11 +1382,14 @@ class ReviewView(QWidget):
                 f"Could not write the CSV file.\n\n{error}")
 
     def _open_compare(self):
-        """Open the current group in a side-by-side compare view."""
-        photos = self._get_current_photos()
+        """Open the selected photos — or the current group — side by side."""
+        photos, note = compare_targets(
+            self._get_current_photos(), self._selected_ids,
+            view_is_one_group=not self._in_global_view())
         if not photos:
+            QMessageBox.information(self, "Compare", note)
             return
-        CompareDialog(photos, self).exec()
+        CompareDialog(photos, self, note=note).exec()
         # Reflect any verdicts set in the dialog back into the grid; the
         # emit lets the undo checkpoint record them.
         for p in photos:
