@@ -3,11 +3,8 @@ import logging
 
 from PySide6.QtCore import QThread, Signal
 
-from app.core.scanner import (
-    collect_files, compute_hashes, fingerprint_and_score,
-    detect_and_analyze_faces,
-    extract_dates, build_photo_events, run_clustering, assign_verdicts,
-)
+from app.core.pipeline import AnalysisOptions, PipelineHooks, analyze
+from app.core.scanner import collect_files
 from app.core.session_store import SessionStore
 from app.core.models import SessionStatus
 
@@ -94,104 +91,42 @@ class ScanWorker(QThread):
             self.scan_error.emit("No supported image files found in the selected folder.")
             return False
 
-        # Phase 2: SHA256 hashes
-        self.phase_changed.emit("Computing file hashes...")
         self.store.update_session_status(self.session_id, SessionStatus.SCANNING)
 
-        def hash_progress(cur, total, fname):
-            self.progress_updated.emit("Hashing", cur, total)
-            self.current_file.emit(fname)
-            self.stats_updated.emit("hashed", cur)
-
-        photos = compute_hashes(files, hash_progress, self._is_cancelled)
-        if self._cancelled:
-            return False
-
-        # Count exact duplicates
-        sha_counts: dict[str, int] = {}
-        for p in photos:
-            if p.sha256:
-                sha_counts[p.sha256] = sha_counts.get(p.sha256, 0) + 1
-        dup_count = sum(v - 1 for v in sha_counts.values() if v > 1)
-        self.stats_updated.emit("duplicates", dup_count)
-
-        # Persist photos
-        self.store.insert_photos_batch(self.session_id, photos)
-
-        # Phase 3+4: fingerprint (pHash) + quality score in one decode pass
-        self.phase_changed.emit("Fingerprinting and scoring...")
-
-        def fp_progress(cur, total, fname):
-            self.progress_updated.emit("Scoring", cur, total)
-            self.current_file.emit(fname)
-            self.stats_updated.emit("phash_computed", cur)
-            self.stats_updated.emit("scored", cur)
-
-        fingerprint_and_score(photos, fp_progress, self._is_cancelled)
-        if self._cancelled:
-            return False
-
-        # Phase 5: Face detection + expression analysis (optional, parallel)
-        if self.face_detection_enabled:
-            self.phase_changed.emit("Analyzing faces...")
-
-            def face_progress(cur, total, fname):
-                self.progress_updated.emit("Faces", cur, total)
-                self.current_file.emit(fname)
-
-            face_stats = detect_and_analyze_faces(
-                photos, face_progress, self._is_cancelled,
-                min_confidence=self.face_min_confidence,
-            )
-            if self._cancelled:
-                return False
-            self.stats_updated.emit("faces_detected", face_stats["faces_total"])
-            self.stats_updated.emit("faces_close", face_stats["faces_close"])
-            self.stats_updated.emit("faces_far", face_stats["faces_far"])
-            self.stats_updated.emit("faces_none", face_stats["faces_none"])
-            self.stats_updated.emit("group_shots", face_stats["group_shots"])
-            self.stats_updated.emit(
-                "expressions_analyzed", face_stats["expressions_analyzed"]
-            )
-
-        # Phase 6: EXIF dates + event grouping
-        self.phase_changed.emit("Extracting dates...")
-
-        def date_progress(cur, total, fname):
-            self.progress_updated.emit("Dates", cur, total)
+        # Phases 2-8 run in the shared core pipeline (app/core/pipeline.py) —
+        # the same code the ranking scorecard measures (RANK-01).
+        def progress(label, cur, total, fname):
+            self.progress_updated.emit(label, cur, total)
             self.current_file.emit(fname)
 
-        dated_count = extract_dates(photos, date_progress, self._is_cancelled)
-        if self._cancelled:
+        hooks = PipelineHooks(
+            phase=self.phase_changed.emit,
+            progress=progress,
+            stat=self.stats_updated.emit,
+            hashed=lambda photos: self.store.insert_photos_batch(self.session_id, photos),
+        )
+        options = AnalysisOptions(
+            phash_threshold=self.phash_threshold,
+            keep_per_cluster=self.keep_per_cluster,
+            event_gap_hours=self.event_gap_hours,
+            face_detection_enabled=self.face_detection_enabled,
+            face_min_confidence=self.face_min_confidence,
+        )
+        result = analyze(files, options, hooks, self._is_cancelled)
+        if result is None or self._cancelled:
             return False
-
-        self.phase_changed.emit("Grouping into events...")
-        events, event_photos = build_photo_events(photos, self.event_gap_hours)
-        if self._cancelled:
-            return False
-        self.stats_updated.emit("events", len(events))
-
-        # Phase 7: Clustering
-        self.phase_changed.emit("Clustering similar photos...")
-        clusters, cluster_photos = run_clustering(photos, self.phash_threshold)
-        if self._cancelled:
-            return False
-        self.stats_updated.emit("clusters", len(clusters))
-
-        # Phase 8: Suggest verdicts
-        self.phase_changed.emit("Generating suggestions...")
-        assign_verdicts(clusters, cluster_photos, self.keep_per_cluster)
 
         # Persist everything
-        self.store.update_photos_batch(photos)
-        self.store.insert_clusters_batch(self.session_id, clusters)
-        self.store.insert_events_batch(self.session_id, events)
+        self.store.update_photos_batch(result.photos)
+        self.store.insert_clusters_batch(self.session_id, result.clusters)
+        self.store.insert_events_batch(self.session_id, result.events)
         self.store.update_session_status(self.session_id, SessionStatus.SCANNED)
         self.store.update_session_progress(self.session_id, len(files), len(files))
 
         log.info(
             "Scan complete: %d photos, %d clusters, %d events, %d exact dupes",
-            len(photos), len(clusters), len(events), dup_count,
+            len(result.photos), len(result.clusters), len(result.events),
+            result.dup_count,
         )
         self.scan_finished.emit()
         return True

@@ -56,7 +56,7 @@ class ScanResetTests(unittest.TestCase):
             errors = []
             worker.scan_error.connect(errors.append)
             with patch(
-                "app.workers.scan_worker.compute_hashes",
+                "app.core.pipeline.compute_hashes",
                 side_effect=RuntimeError("disk on fire"),
             ):
                 worker.run()
