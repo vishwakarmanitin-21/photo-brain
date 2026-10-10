@@ -700,7 +700,7 @@
     <li><b>RANK-10</b> show why each pick was made</li>
     <li><b>RANK-09</b> local aesthetic model + <b>CLUST-04</b> same-moment grouping — after Nitin's size decision</li>
     <li>Then resume launch: ADOPT-04/05/07, with the measured agreement number as the headline</li>
-    <li><b>Speed &amp; image quality (10 Oct audit, 15 items):</b> quick wins first — <b>UX-17</b> Compare freeze, <b>UX-18</b> arrow-key lag, <b>PERF-07</b> search debounce, <b>PERF-08</b> 3× faster thumbnails (with UX-16); then <b>UX-19</b> sharp images on scaled screens and <b>FEAT-07</b> a full-size view with zoom &amp; pan</li>
+    <li><b>Speed &amp; image quality (10 Oct audit):</b> quick wins <b>shipped 10 Oct</b> — UX-17 Compare freeze, UX-18 arrow-key lag, UX-16 + PERF-08 upright thumbnails ~3-4× faster, UX-20 Compare, UX-23 resize reflow, PERF-11 autosave, PERF-07 search debounce (half). Next: <b>UX-19</b> sharp images on scaled screens and <b>FEAT-07</b> a full-size view with zoom &amp; pan</li>
   </ol>
     </div>
     <div class="summary-card needs">
@@ -1501,7 +1501,7 @@ const ITEMS = [
   {
     id: "UX-16",
     title: "Portrait photos from phones show sideways in the review grid and zoomed views",
-    status: "open",
+    status: "shipped",
     priority: "P1",
     severity: "High",
     category: "ux",
@@ -1516,11 +1516,14 @@ const ITEMS = [
     reauditNote: "10-Oct UX audit: the Compare view has the same problem (app/ui/compare_dialog.py:48 loads with QPixmap, no auto-rotate) — fix it in the same change; see UX-20. Do the `draft()` speed-up from PERF-08 on the same lines of thumbnails.py.",
     createdAt: "2026-10-10",
     updatedAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "ddf94d6",
+    shipNote: "Thumbnails and zoom previews apply the EXIF orientation (cached copy only; originals untouched). Cache files carry a format tag so old sideways files are never shown and are pruned; review now prunes before building the grid so they cannot flash up. Compare's rotation path fixed with UX-20 (d94ac45). Tests: portrait thumbnail/preview upright, old files ignored and pruned.",
   },
   {
     id: "UX-17",
     title: "Compare in the 'All photos (ranked)' view tries to open up to 600 full-size photos and freezes the app",
-    status: "open",
+    status: "shipped",
     priority: "P1",
     severity: "High",
     category: "ux",
@@ -1532,11 +1535,15 @@ const ITEMS = [
     summary: "`_open_compare` (app/ui/review_view.py:1354-1359) passes `_get_current_photos()`, which in the flat view is the whole capped grid (`MAX_FLAT_GRID = 600`, :245). The Compare button is not in `_cluster_only_buttons` (:1176-1182), so it stays enabled, and `CompareDialog` decodes every photo at full resolution on the UI thread (`QPixmap(photo.filepath)`, app/ui/compare_dialog.py:48). Measured by the 10-Oct UX audit (synthetic 12 MP JPEGs, CPU heavily loaded so times inflated): Compare received 600 photos; a 6-photo dialog alone took 3.5 s. Root cause confirmed in code 10 Oct. Fix: in the flat view, compare only the multi-selection (cap ~6) or disable Compare.",
     files: ["app/ui/review_view.py:245,1176-1182,1354-1359", "app/ui/compare_dialog.py:48"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "110dc32",
+    updatedAt: "2026-10-10",
+    shipNote: "Compare now opens the selected photos (Ctrl+click, 2 or more) or the current group, capped at 8 with a note; in the all-photos view with no selection it asks you to select 2-8 photos instead of loading up to 600 originals. Tests through the review screen.",
   },
   {
     id: "UX-18",
     title: "Moving the selection restyles every card, so arrow keys lag more the more photos are shown",
-    status: "open",
+    status: "shipped",
     priority: "P1",
     severity: "High",
     category: "ux",
@@ -1548,6 +1555,10 @@ const ITEMS = [
     summary: "`_apply_selection_visuals` (app/ui/review_view.py:2008-2011) calls `set_selected` on every tile; each runs `_update_style` (:638-689), several `setStyleSheet` calls per card. Measured by the 10-Oct UX audit: one arrow press = 3,601 setStyleSheet calls on a 600-tile grid (241 on a 40-tile group); ~3.2 s per press under heavy CPU load (estimated ~0.45 s idle), ~0.3 s for 40 tiles (~40 ms idle). Root cause confirmed in code 10 Oct. Fix: restyle only tiles whose state changed (old vs new selection); later, paint selection in paintEvent instead of stylesheets.",
     files: ["app/ui/review_view.py:638-689,2008-2011"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "5497c9b",
+    updatedAt: "2026-10-10",
+    shipNote: "A card restyles only when its own selection state changes, so an arrow move restyles exactly 2 cards whatever the grid size (was every card: 3,601 stylesheet calls per press at 600 tiles). Test: 40-photo group, one move = 2 restyles.",
   },
   {
     id: "UX-19",
@@ -1568,7 +1579,7 @@ const ITEMS = [
   {
     id: "UX-20",
     title: "Compare view: slow to open, blank for iPhone (HEIC) photos, portraits sideways, fixed small size with no zoom",
-    status: "open",
+    status: "shipped",
     priority: "P2",
     severity: "Medium",
     category: "ux",
@@ -1580,6 +1591,10 @@ const ITEMS = [
     summary: "app/ui/compare_dialog.py:48 decodes each original at full resolution on the UI thread with `QPixmap(path)`, which (measured by the 10-Oct UX audit) returns null for HEIC — the venv's Qt image plugins have no HEIF — so the panel shows '(preview unavailable)' (:53), a gap in FEAT-02; and it ignores the EXIF rotate tag (a stored-sideways test file loaded 400×300 where the hover preview correctly gives 300×400) — a path missing from UX-16. Images are fixed at 460 px (:128) with no zoom, synchronised pan or keyboard shortcuts. Fix: use the existing bounded, auto-rotating loader on a background thread with the PIL fallback; add linked zoom/pan.",
     files: ["app/ui/compare_dialog.py:48,53,128"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "d94ac45",
+    updatedAt: "2026-10-10",
+    shipNote: "Compare opens instantly and decodes in the background through a new shared loader (app/ui/image_loading.py: Qt scaled decode with auto-rotation, Pillow fallback for HEIC), sized to the screen (320-900 px; 612 px measured on Nitin's display) and decoded at screen pixels x devicePixelRatio. Closing early is harmless (that bug was found and fixed while testing on real photos). Linked zoom/pan moved to FEAT-07.",
   },
   {
     id: "UX-21",
@@ -1596,6 +1611,8 @@ const ITEMS = [
     summary: "From the 10-Oct UX audit: the hover image is decoded on the UI thread (app/ui/review_view.py:1506; 264 ms per hover under heavy load vs 668 ms for a full decode — so the UX-03 fix bounded the size but did not make it asynchronous); no cache, so every re-hover decodes again; HEIC falls back to a full Pillow decode on the UI thread (:315-321); it triggers only in `enterEvent` (:702-709), so pressing Alt while already over a tile does nothing; it positions with `primaryScreen().geometry()` (:388) — wrong on a second monitor and over the taskbar; the frame is hard-coded white (:361). Fix: background decode + small cache, react to Alt key presses, `screenAt(pos).availableGeometry()`, palette colours.",
     files: ["app/ui/review_view.py:315-321,361,388,702-709,1506"],
     createdAt: "2026-10-10",
+    updatedAt: "2026-10-10",
+    progress: "PARTLY ADDRESSED 2026-10-10 (d94ac45): the hover preview now uses the shared loader, so iPhone (HEIC) photos are decoded at reduced size and upright instead of a full Pillow decode. Still open: decode off the UI thread + cache, Alt pressed mid-hover, second-monitor placement, dark-mode frame.",
   },
   {
     id: "UX-22",
@@ -1616,7 +1633,7 @@ const ITEMS = [
   {
     id: "UX-23",
     title: "The grid does not reflow when the window is resized, and Up/Down then jumps to the wrong photo",
-    status: "open",
+    status: "shipped",
     priority: "P2",
     severity: "Medium",
     category: "ux",
@@ -1628,6 +1645,10 @@ const ITEMS = [
     summary: "No `resizeEvent` in app/ui (confirmed 10 Oct): the column count is set only when the grid is rebuilt (app/ui/review_view.py:1432), but `_move_selection_by_rows` computes columns from the live width (:2414). Measured by the 10-Oct UX audit: after widening, 10 columns stayed laid out while 11 would fit, so Up/Down moved by 11 across 10-column rows. Side effect of UX-12's grid navigation. Fix: debounced relayout on resize, one source for the column count.",
     files: ["app/ui/review_view.py:1432,2414"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "e38f55c",
+    updatedAt: "2026-10-10",
+    shipNote: "A resize watcher on the grid reflows the existing tiles (no re-creation, no image reload) when a different column count fits; Up/Down uses the columns actually laid out. Test: widen -> more columns, same tile objects, Down moves one row.",
   },
   {
     id: "UX-24",
@@ -1925,6 +1946,8 @@ const ITEMS = [
     summary: "From code reading (10-Oct UX audit): the zoom slider resizes tiles only, 120-800 px (`MIN/MAX_THUMB_SIZE`, app/ui/review_view.py:93-94); keyboard +/−/0 step 20 px (:1374,1381) and the slider itself 1 px per arrow; no `wheelEvent` anywhere (no Ctrl+wheel or pinch — confirmed 10 Oct); double-click hands the file to the Windows viewer (:695-700). Fix: a loupe/single-photo view (Space or Enter) with fit / 100% / pan, preloading previous and next, keeping K/A/D/Ctrl+Z, with Ctrl+wheel zoom; reuse the bounded background decode. Pairs with UX-19 (DPI) and UX-20 (compare zoom).",
     files: ["app/ui/review_view.py:93-94,695-700,1374,1381"],
     createdAt: "2026-10-10",
+    updatedAt: "2026-10-10",
+    reauditNote: "Also carries Compare's linked zoom/pan (moved here from UX-20, 2026-10-10): one zoom/pan component should serve both the single-photo view and Compare.",
   },
   {
     id: "PERF-01",
@@ -2023,7 +2046,7 @@ const ITEMS = [
   {
     id: "PERF-07",
     title: "The grid is torn down and rebuilt — every tile re-created, every thumbnail re-read — on group switch, filter, zoom and each search keystroke",
-    status: "open",
+    status: "in-progress",
     priority: "P1",
     severity: "High",
     category: "performance",
@@ -2035,11 +2058,13 @@ const ITEMS = [
     summary: "`_rebuild_grid_with_zoom` (app/ui/review_view.py:1414-1480) runs on group switch, zoom settle, filter change and search; `_search_box.textChanged` goes straight to `_apply_filters` (:964, no debounce — confirmed in code 10 Oct), which also clears and refills the group list (:1802-1806). Thumbnails are re-decoded from disk with `QPixmap(photo.thumb_path)` each time (:1455,1460) — no in-memory cache. Measured by the 10-Oct UX audit under heavy CPU load (counts exact, times inflated): one 600-tile rebuild = 600 widget constructions, 600 disk decodes, ~7,800 setStyleSheet calls, 10 s (est. ~1.4 s idle); one search keystroke ~11 s. UX-02's debounce covers slider drags only — once the zoom settles the grid is still rebuilt. Fix (quick, S): 250 ms search debounce; reflow existing widgets on zoom; decoded-thumbnail memory cache keyed by sha256. Fix (proper, L): a virtualised list view (QListView + delegate) that creates only visible tiles and removes MAX_FLAT_GRID.",
     files: ["app/ui/review_view.py:964,1414-1480,1802-1806"],
     createdAt: "2026-10-10",
+    updatedAt: "2026-10-10",
+    progress: "QUICK HALF SHIPPED 2026-10-10 (db1fcde): search filters once typing pauses (250 ms; Enter and clear are immediate) and decoded thumbnails live in a 1,000-entry in-memory LRU shared by grid builds and late arrivals. REMAINING: reflow existing tiles on zoom instead of rebuilding, and a virtualised grid that removes MAX_FLAT_GRID (L).",
   },
   {
     id: "PERF-08",
     title: "Thumbnails take ~2.5-3x longer than necessary, start only when review opens, use one thread and show no progress",
-    status: "open",
+    status: "shipped",
     priority: "P1",
     severity: "High",
     category: "performance",
@@ -2052,6 +2077,10 @@ const ITEMS = [
     summary: "`generate_thumbnail` calls `img.convert('RGB')` before `thumbnail()` (app/core/thumbnails.py:51-53), forcing a full decode and defeating the JPEG reduced-size decode (`draft`); `generate_preview` does the same (:113-117). MEASURED 10 Oct by Claude on 8 real 9-megapixel phone photos from Nitin's Camera Roll (machine near normal load): 323-409 ms per thumbnail as written vs 130-135 ms with `img.draft('RGB', …)` first — ~2.5-3x. The 10-Oct UX audit also found (code): the thumb worker starts only in `_load_review` (app/ui/main_window.py:344), is single-threaded, runs in group order rather than what is on screen, its `progress_updated` signal is never connected (:369-371), and already-cached thumbnails are re-emitted so every visible tile decodes twice on resume (thumbnails.py:48-49 → review_view.py:1586). Fix: `draft()` before convert (do it together with UX-16's EXIF rotation, same lines); visible-first ordering; 2-4 threads; progress text. Thumbnail decode was the part PERF-03 left out.",
     files: ["app/core/thumbnails.py:48-53,113-117", "app/ui/main_window.py:344,369-371", "app/ui/review_view.py:1586"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "ddf94d6",
+    updatedAt: "2026-10-10",
+    shipNote: "draft() before decode: MEASURED on 8 real 9 MP photos from Nitin's Camera Roll, 323-409 ms -> 98 ms per thumbnail. Worker: 3 threads, on-screen photos first, one generation per cache key, no re-send of thumbnails the grid already shows, 'Preparing thumbnails... N of M' progress. Tests for each.",
   },
   {
     id: "PERF-09",
@@ -2088,7 +2117,7 @@ const ITEMS = [
   {
     id: "PERF-11",
     title: "Every decision re-saves every photo in the library; opening review runs one database query per group",
-    status: "open",
+    status: "shipped",
     priority: "P3",
     severity: "Low",
     category: "performance",
@@ -2100,6 +2129,10 @@ const ITEMS = [
     summary: "`_persist_review_state` (app/ui/main_window.py:398-406 — confirmed 10 Oct) writes every photo and every group on each 400 ms debounce. Measured by the 10-Oct UX audit (heavy CPU load): saving 5,000 photos 178-235 ms vs 1 ms for the one changed photo; `_load_review` (:323-326) runs one query per group, 654 ms vs 360 ms for a single query. Fix: save only changed photos (dirty set); load all photos in one query and group in memory.",
     files: ["app/ui/main_window.py:323-326,398-406"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "b27b14a",
+    updatedAt: "2026-10-10",
+    shipNote: "Autosave writes only photos/groups whose review state changed since the last save (snapshot taken at review load); review loads every photo in one query, same per-group order. Tests: one change -> one row written; no change -> no write.",
   },
   {
     id: "ADOPT-01",
@@ -2492,7 +2525,7 @@ const ITEMS = [
   {
     id: "CLUST-05",
     title: "Capture time is read from the 'last modified' field, not 'date taken'",
-    status: "open",
+    status: "shipped",
     priority: "P2",
     severity: "Medium",
     category: "clustering",
@@ -2505,6 +2538,10 @@ const ITEMS = [
     summary: "`extract_exif_datetime` (app/core/events.py) looks for DateTimeOriginal (36867) and DateTimeDigitized (36868) in `img.getexif()`, which only returns the main IFD0 block — on real photos both tags live in the Exif sub-IFD (0x8769), so they are never found and the code falls back to IFD0 DateTime (306), the file-modification time. MEASURED 2026-10-10 on 12 photos sampled across Nitin's 2025 Camera Roll: DateTimeOriginal absent from IFD0 in 12 of 12, present in the Exif sub-IFD in 12 of 12; DateTime matched it in 12 of 12 because these are unedited phone originals. Fix: read `exif.get_ifd(0x8769)` first, then fall back to IFD0 DateTime; add a test with a JPEG whose DateTimeOriginal differs from DateTime. Affects the capture-time gate in clustering, events and the ranking scorecard's moments — a scoring-relevant file, so re-run the scorecard (RANK-01) with the fix.",
     files: ["app/core/events.py:26-49"],
     createdAt: "2026-10-10",
+    shippedAt: "2026-10-10",
+    shippedBy: "b45895d",
+    updatedAt: "2026-10-10",
+    shipNote: "Reads DateTimeOriginal / DateTimeDigitized from the Exif sub-IFD, IFD0 DateTime only as a last resort; the ranking label index re-reads dates cached by the old reader. Tests include an edited photo whose saved date differs from its taken date.",
   },
 ];
 
