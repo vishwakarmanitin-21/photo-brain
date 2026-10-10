@@ -1,6 +1,7 @@
 """Review view — cluster list + thumbnail grid with keyboard shortcuts."""
 import os
 import logging
+import math
 from collections import OrderedDict
 
 from PySide6.QtWidgets import (
@@ -108,8 +109,26 @@ MIN_THUMB_SIZE = 120  # Minimum thumbnail size
 MAX_THUMB_SIZE = 800  # Maximum thumbnail size
 BASE_THUMB_SIZE = 180  # Base display size (middle of range)
 THUMB_DISPLAY_SIZE = 180  # Keep for backward compatibility
-THUMB_CACHE_SIZE = 200  # Resolution of cached thumbnails; above this we
-                        # load high-res previews instead
+# Pixel size of the cached thumbnails (core THUMB_SIZE). A tile needing more
+# SCREEN pixels than this (its size x the display's scale factor) loads a zoom
+# preview instead of stretching the thumbnail (UX-19).
+THUMB_CACHE_SIZE = 320
+
+# Zoom previews come in fixed pixel steps, not one per slider position: each
+# step is decoded once and reused across nearby zoom levels, and the preview
+# cache holds a handful of sizes per photo instead of dozens (PERF-09).
+PREVIEW_STEPS = (480, 800, 1200, 1600, 2400)
+
+
+def preview_step(pixels: int) -> int:
+    """Smallest preview step with at least `pixels` on its long side."""
+    return next((s for s in PREVIEW_STEPS if s >= pixels), PREVIEW_STEPS[-1])
+
+
+def screen_pixels(widget, logical: int) -> int:
+    """Device pixels needed to draw `logical` points sharply on the widget's
+    screen (125% scaling: 180 pt -> 225 px)."""
+    return math.ceil(logical * max(1.0, widget.devicePixelRatioF()))
 
 # Colors
 COLOR_KEEP = "#4CAF50"
@@ -328,7 +347,8 @@ def sort_photos(photos: list, mode: str) -> list:
     return sorted(photos, key=lambda p: (-(p.quality_score or 0), p.filepath))
 
 
-HOVER_PREVIEW_MAX = 1000  # hover overlay never needs more than this
+HOVER_PREVIEW_SIZE = 800   # hover overlay size in points
+HOVER_PREVIEW_MAX = 2400   # decode cap in pixels (800 pt at up to 300% scaling)
 
 
 def cluster_display_label(cluster) -> str:
@@ -395,12 +415,15 @@ class HoverPreviewWidget(QWidget):
         self.hide()
 
     def show_preview(self, pixmap: QPixmap, cursor_pos: QPoint):
-        """Show preview near cursor position."""
-        # Scale to max 800×800 while preserving aspect ratio
+        """Show preview near cursor position, sharp on scaled displays."""
+        screen = QApplication.screenAt(cursor_pos) or QApplication.primaryScreen()
+        ratio = max(1.0, screen.devicePixelRatio())
+        target = math.ceil(HOVER_PREVIEW_SIZE * ratio)
         scaled = pixmap.scaled(
-            800, 800,
+            target, target,
             Qt.KeepAspectRatio, Qt.SmoothTransformation,
         )
+        scaled.setDevicePixelRatio(ratio)
         self._image_label.setPixmap(scaled)
         self.adjustSize()
 
@@ -408,12 +431,15 @@ class HoverPreviewWidget(QWidget):
         x = cursor_pos.x() + 20
         y = cursor_pos.y() + 20
 
-        # Adjust if would go off-screen
-        screen = QApplication.primaryScreen().geometry()
-        if x + self.width() > screen.right():
+        # Keep it on the monitor under the cursor and off the taskbar
+        # (was: the primary screen's full geometry).
+        area = screen.availableGeometry()
+        if x + self.width() > area.right():
             x = cursor_pos.x() - self.width() - 20
-        if y + self.height() > screen.bottom():
+        if y + self.height() > area.bottom():
             y = cursor_pos.y() - self.height() - 20
+        x = max(area.left(), x)
+        y = max(area.top(), y)
 
         self.move(x, y)
         self.show()
@@ -611,15 +637,20 @@ class ThumbnailWidget(QFrame):
             self._image_label.setFixedSize(display_size, display_size)
             return
 
-        # Scale maintaining aspect ratio
+        # Scale to SCREEN pixels and tag the pixmap with the display's scale
+        # factor, so a 125%/150% screen draws it 1:1 instead of stretching a
+        # logical-size image (UX-19).
+        ratio = max(1.0, self.devicePixelRatioF())
+        target = screen_pixels(self, display_size)
         scaled = pixmap.scaled(
-            display_size, display_size,
+            target, target,
             Qt.KeepAspectRatio, Qt.SmoothTransformation,
         )
+        scaled.setDevicePixelRatio(ratio)
 
-        # Set the image label to the actual scaled size (not square)
-        actual_width = scaled.width()
-        actual_height = scaled.height()
+        # Set the image label to the actual scaled size (not square), in points
+        actual_width = math.ceil(scaled.width() / ratio)
+        actual_height = math.ceil(scaled.height() / ratio)
         self._image_label.setFixedSize(actual_width, actual_height)
         self._image_label.setPixmap(scaled)
         self._image_label.setText("")
@@ -755,7 +786,7 @@ class ReviewView(QWidget):
     back_requested = Signal()
     open_log_requested = Signal()
     review_state_changed = Signal()
-    previews_requested = Signal(object, int)  # photos, display_size
+    previews_requested = Signal(object, int)  # photos, preview step (pixels)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -784,7 +815,7 @@ class ReviewView(QWidget):
         self._verdict_undo_stack: list[list[tuple]] = []
         self._current_display_size = BASE_THUMB_SIZE  # Current thumbnail display size
         self._preview_pixmaps: dict[str, QPixmap] = {}
-        self._preview_pixmap_size = BASE_THUMB_SIZE
+        self._preview_pixmap_size = 0  # preview step the cached previews are at
         self._zoom_debounce = QTimer(self)
         self._zoom_debounce.setSingleShot(True)
         self._zoom_debounce.setInterval(150)
@@ -1356,6 +1387,12 @@ class ReviewView(QWidget):
         """Get current thumbnail display size from slider."""
         return self._current_display_size
 
+    def _preview_step_for(self, display_size: int) -> int:
+        """Preview step a tile of `display_size` points needs, or 0 when the
+        cached thumbnail is already sharp enough on this screen."""
+        needed = screen_pixels(self, display_size)
+        return 0 if needed <= THUMB_CACHE_SIZE else preview_step(needed)
+
     def _get_grid_columns(self) -> int:
         """Calculate column count dynamically based on available width and thumb size."""
         # Get available width from scroll area
@@ -1456,9 +1493,12 @@ class ReviewView(QWidget):
 
     def _on_zoom_changed(self, value: int):
         """Handle zoom slider value change."""
-        if value != self._preview_pixmap_size:
+        # Decoded previews stay valid for every zoom level that maps to the
+        # same preview step; only a step change makes them stale.
+        step = self._preview_step_for(value)
+        if step != self._preview_pixmap_size:
             self._preview_pixmaps.clear()
-            self._preview_pixmap_size = value
+            self._preview_pixmap_size = step
         self._current_display_size = value
         self._zoom_slider.setToolTip(f"Thumbnail size: {value}px")
 
@@ -1502,6 +1542,10 @@ class ReviewView(QWidget):
             return
 
         display_size = self._get_display_size()
+        step = self._preview_step_for(display_size)
+        if step != self._preview_pixmap_size:
+            self._preview_pixmaps.clear()
+            self._preview_pixmap_size = step
         grid_columns = self._get_grid_columns()
         missing_previews: list[Photo] = []
 
@@ -1521,7 +1565,7 @@ class ReviewView(QWidget):
             widget.update_size(display_size)
 
             # Load high-res or cached thumbnail
-            if display_size > THUMB_CACHE_SIZE:
+            if step:
                 pixmap = self._preview_pixmaps.get(photo.id, QPixmap())
                 if pixmap.isNull():
                     if photo.thumb_path and os.path.isfile(photo.thumb_path):
@@ -1551,12 +1595,12 @@ class ReviewView(QWidget):
         self._laid_out_columns = grid_columns
 
         if missing_previews:
-            self.previews_requested.emit(missing_previews, display_size)
+            self.previews_requested.emit(missing_previews, step)
 
     @Slot(str, int, object)
-    def on_preview_ready(self, photo_id: str, display_size: int, image):
+    def on_preview_ready(self, photo_id: str, step: int, image):
         """Swap in a worker-decoded preview if it still matches the view."""
-        if display_size != self._current_display_size:
+        if step != self._preview_step_for(self._current_display_size):
             return
         if not any(photo.id == photo_id for photo in self._current_photos):
             return
@@ -1564,10 +1608,10 @@ class ReviewView(QWidget):
         if pixmap.isNull():
             return
         self._preview_pixmaps[photo_id] = pixmap
-        self._preview_pixmap_size = display_size
+        self._preview_pixmap_size = step
         widget = self._thumb_widgets.get(photo_id)
         if widget:
-            widget.set_pixmap(pixmap, display_size)
+            widget.set_pixmap(pixmap, self._current_display_size)
 
     def _show_hover_preview(self, photo_id: str, cursor_pos: QPoint):
         """Show full-size preview on hover."""
@@ -1577,7 +1621,8 @@ class ReviewView(QWidget):
 
         # Decode downscaled to the overlay size — loading a full 12–48MP
         # original mid-mouse-move would freeze the grid.
-        pixmap = load_bounded_pixmap(photo.filepath, HOVER_PREVIEW_MAX)
+        needed = min(HOVER_PREVIEW_MAX, screen_pixels(self, HOVER_PREVIEW_SIZE))
+        pixmap = load_bounded_pixmap(photo.filepath, needed)
         if pixmap.isNull():
             return
 
@@ -1688,7 +1733,7 @@ class ReviewView(QWidget):
             return
         # Don't let a late 200px thumbnail overwrite a high-res preview the
         # user already zoomed into.
-        if widget._display_size > THUMB_CACHE_SIZE:
+        if screen_pixels(widget, widget._display_size) > THUMB_CACHE_SIZE:
             return
         pixmap = self._thumb_pixmap(thumb_path)
         if not pixmap.isNull():

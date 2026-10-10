@@ -64,7 +64,7 @@ class UprightCacheTests(unittest.TestCase):
             Image.new("RGB", (4000, 3000), (90, 120, 150)).save(path, quality=90)
             out = ThumbnailCache(os.path.join(d, "t")).generate_thumbnail(_photo(path))
             with Image.open(out) as im:
-                self.assertEqual((200, 150), im.size)
+                self.assertEqual((320, 240), im.size)
 
 
 if __name__ == "__main__":

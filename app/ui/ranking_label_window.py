@@ -109,7 +109,10 @@ class _Tile(QFrame):
         if image.isNull():
             self.image.setText("Cannot display")
             return
-        pix = QPixmap.fromImage(image).scaled(self.image.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        ratio = max(1.0, self.devicePixelRatioF())  # sharp on scaled displays (UX-19)
+        pix = QPixmap.fromImage(image).scaled(self.image.size() * ratio, Qt.KeepAspectRatio,
+                                              Qt.SmoothTransformation)
+        pix.setDevicePixelRatio(ratio)
         self.image.setPixmap(pix)
 
     def set_label(self, label):
@@ -247,7 +250,8 @@ class RankingLabelWindow(QMainWindow):
             tile.set_label(self.current[rel])
             self.grid.addWidget(tile, i // self.cols, i % self.cols)
             self.tiles.append(tile)
-            self.pool.start(_LoadTask(self.token, self.root, rel, edge, self.signals))
+            decode_px = int(edge * max(1.0, self.devicePixelRatioF()))
+            self.pool.start(_LoadTask(self.token, self.root, rel, decode_px, self.signals))
         self.focus = 0
         self._refocus()
         if series:

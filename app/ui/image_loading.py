@@ -18,6 +18,8 @@ convert to QPixmap on the UI thread.
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QImageReader, QPixmap
 
+from app.core.thumbnails import _draft_size
+
 
 def load_bounded_image(filepath: str, max_dim: int) -> QImage:
     """Decode `filepath` scaled to fit within max_dim x max_dim, upright.
@@ -44,7 +46,7 @@ def _load_via_pil(filepath: str, max_dim: int) -> QImage:
         from PIL import Image, ImageOps
         from app.core import image_formats  # noqa: F401  (registers HEIC)
         with Image.open(filepath) as img:
-            img.draft("RGB", (max_dim, max_dim))  # JPEG: decode at reduced size
+            img.draft("RGB", _draft_size(img.size, max_dim))  # JPEG: decode at reduced size
             img = ImageOps.exif_transpose(img).convert("RGB")
             img.thumbnail((max_dim, max_dim))
             data = img.tobytes()

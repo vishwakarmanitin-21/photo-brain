@@ -9,6 +9,7 @@ library.
 """
 import os
 import logging
+import math
 import threading
 from typing import Callable, Optional
 
@@ -20,15 +21,32 @@ from app.core import image_formats  # noqa: F401
 
 log = logging.getLogger("photobrain.thumbnails")
 
-THUMB_SIZE = (200, 200)
+# 320 px: sharp for the default 180-pt tile at up to ~175% display scaling
+# (UX-19). Larger tiles switch to zoom previews.
+THUMB_SIZE = (320, 320)
 THUMB_QUALITY = 85
 PREVIEW_QUALITY = 92
 
 # Cache file format tag. Bumped when the rendering of cached images changes,
 # so files made the old way are never shown again and the next prune removes
 # them (their names no longer parse as a valid key). "u1" = upright: the EXIF
-# orientation is applied (UX-16) — earlier files showed phone portraits sideways.
-CACHE_FORMAT = "u1"
+# orientation is applied (UX-16). "u2" = 320 px thumbnails for high-DPI
+# screens (UX-19); also retires the odd-sized previews of the old per-pixel
+# zoom sizes.
+CACHE_FORMAT = "u2"
+
+
+def _draft_size(size: tuple[int, int], max_dim: int) -> tuple[int, int]:
+    """Size to hand to Image.draft so the JPEG decoder may shrink as far as it
+    can while the LONG side still reaches max_dim. Asking for (max_dim,
+    max_dim) forces the short side to max_dim too, which made a 320-px
+    thumbnail of a 9 MP portrait decode at 1/4 scale instead of 1/8 —
+    measured 281 ms vs ~100 ms per photo."""
+    w, h = size
+    scale = max_dim / max(w, h, 1)
+    if scale >= 1:
+        return size
+    return max(1, math.ceil(w * scale)), max(1, math.ceil(h * scale))
 
 
 def _open_for_display(filepath: str, max_dim: int) -> Image.Image:
@@ -42,7 +60,7 @@ def _open_for_display(filepath: str, max_dim: int) -> Image.Image:
       Only the cached copy is rotated; the original file is never touched.
     """
     img = Image.open(filepath)
-    img.draft("RGB", (max_dim, max_dim))
+    img.draft("RGB", _draft_size(img.size, max_dim))
     upright = ImageOps.exif_transpose(img)
     rgb = upright.convert("RGB")
     rgb.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
