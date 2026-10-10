@@ -9,14 +9,15 @@ app/core/ranking_eval.py; this module is widgets only.
 """
 import os
 
-from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QImage, QImageReader, QPixmap
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QImage, QPixmap
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from app.core.hashing import compute_sha256
+from app.ui.image_loading import load_bounded_image
 from app.core.ranking_eval import (
     LabelStore, Moment, build_moments, labelling_order, labels_path,
 )
@@ -40,30 +41,6 @@ SINGLES_HELP = ("<b>Mark the bad ones.</b> Click a photo to toggle <b>Junk</b> (
                 "genuinely great (★ Best). Same keys as before; <b>Enter</b> saves the page.")
 
 
-def _load_image(path: str, edge: int) -> QImage:
-    """Downscaled, EXIF-upright image. Qt decodes JPEG at reduced size directly,
-    so a 50-megapixel photo loads in milliseconds."""
-    reader = QImageReader(path)
-    reader.setAutoTransform(True)
-    size = reader.size()
-    if size.isValid() and max(size.width(), size.height()) > edge:
-        s = edge / max(size.width(), size.height())
-        reader.setScaledSize(QSize(max(1, int(size.width() * s)), max(1, int(size.height() * s))))
-    image = reader.read()
-    if not image.isNull():
-        return image
-    try:  # HEIC and anything else Qt cannot read
-        from PIL import Image, ImageOps
-        from app.core import image_formats  # noqa: F401  (registers HEIF)
-        with Image.open(path) as im:
-            im = ImageOps.exif_transpose(im).convert("RGB")
-            im.thumbnail((edge, edge))
-            data = im.tobytes()
-            return QImage(data, im.width, im.height, 3 * im.width, QImage.Format_RGB888).copy()
-    except Exception:
-        return QImage()
-
-
 class _LoadSignals(QObject):
     loaded = Signal(int, str, QImage, str)  # page token, rel path, image, sha256
 
@@ -75,9 +52,12 @@ class _LoadTask(QRunnable):
 
     def run(self):
         path = os.path.join(self.root, self.rel)
-        image = _load_image(path, self.edge)
+        image = load_bounded_image(path, self.edge)
         sha = compute_sha256(path) or ""
-        self.signals.loaded.emit(self.token, self.rel, image, sha)
+        try:
+            self.signals.loaded.emit(self.token, self.rel, image, sha)
+        except RuntimeError:
+            pass  # the window closed before this load finished
 
 
 class _ClickLabel(QLabel):

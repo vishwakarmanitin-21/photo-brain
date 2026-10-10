@@ -9,17 +9,17 @@ from PySide6.QtWidgets import (
     QLineEdit, QMessageBox, QFileDialog,
 )
 from PySide6.QtCore import (
-    Signal, Qt, Slot, QSize, QUrl, QPoint, QTimer, QObject, QEvent,
+    Signal, Qt, Slot, QUrl, QPoint, QTimer, QObject, QEvent,
 )
 from PySide6.QtGui import (
     QPixmap, QKeySequence, QColor, QShortcut, QDesktopServices, QCursor,
-    QImageReader,
 )
 
 from app.core.models import Photo, Cluster, Event, Verdict, DupType, FaceDistance
 from app.core.scoring import is_low_quality
 from app.ui.dialogs import ShortcutsHelpDialog
 from app.ui.compare_dialog import CompareDialog
+from app.ui.image_loading import load_bounded_pixmap  # shared, upright, any format
 
 # Single source of truth for the review shortcuts — used to bind them AND
 # to populate the discoverable help dialog, so the two never drift.
@@ -322,35 +322,6 @@ def cluster_display_label(cluster) -> str:
     elif cluster.reviewed:
         text += "  ✓ reviewed"
     return text
-
-
-def load_bounded_pixmap(filepath: str, max_dim: int) -> QPixmap:
-    """Decode an image downscaled to fit max_dim, using the JPEG decoder's
-    own scaling — dramatically faster than loading a full 12–48MP original
-    just to shrink it. Returns a null pixmap on failure."""
-    reader = QImageReader(filepath)
-    reader.setAutoTransform(True)
-    size = reader.size()
-    if size.isValid() and (size.width() > max_dim or size.height() > max_dim):
-        scaled = size.scaled(max_dim, max_dim, Qt.KeepAspectRatio)
-        reader.setScaledSize(scaled)
-    image = reader.read()
-    if not image.isNull():
-        return QPixmap.fromImage(image)
-    # Qt can't decode HEIC without a plugin — fall back to Pillow (FEAT-02).
-    return _load_bounded_via_pil(filepath, max_dim)
-
-
-def _load_bounded_via_pil(filepath: str, max_dim: int) -> QPixmap:
-    try:
-        from PIL import Image, ImageQt
-        from app.core import image_formats  # noqa: F401  (registers HEIC)
-        with Image.open(filepath) as img:
-            img = img.convert("RGB")
-            img.thumbnail((max_dim, max_dim))
-            return QPixmap.fromImage(ImageQt.ImageQt(img))
-    except Exception:
-        return QPixmap()
 
 
 def _format_size(n: float) -> str:
