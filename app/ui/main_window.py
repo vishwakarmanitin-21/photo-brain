@@ -33,6 +33,27 @@ from app.util.logging_util import setup_logging
 
 log = logging.getLogger("photobrain.main_window")
 
+
+# ── Review autosave: write only what changed (PERF-11) ───────────────
+# Every decision used to re-save every photo and group in the library (the
+# UX audit measured ~200 ms per save on 5,000 photos vs ~1 ms for one).
+
+def _photo_review_state(p):
+    """The fields review can change on a photo (plus where it lives)."""
+    return (p.verdict, p.user_override, p.thumb_path, p.filepath, p.cluster_id)
+
+
+def _cluster_review_state(c):
+    return (c.keep_count, c.delete_count, c.reviewed)
+
+
+def _changed(items, state_of, snapshot):
+    """Items whose state differs from the last saved snapshot — all of them
+    when there is no snapshot (nothing known about the database yet)."""
+    if snapshot is None:
+        return list(items)
+    return [i for i in items if snapshot.get(i.id) != state_of(i)]
+
 VIEW_SETUP = 0
 VIEW_SCAN = 1
 VIEW_REVIEW = 2
@@ -321,9 +342,8 @@ class MainWindow(QMainWindow):
         self.store.update_session_status(self.session_id, SessionStatus.REVIEWING)
 
         clusters = self.store.get_clusters_by_session(self.session_id)
-        cluster_photos = {}
-        for c in clusters:
-            cluster_photos[c.id] = self.store.get_photos_by_cluster(c.id)
+        by_cluster = self.store.get_photos_grouped_by_cluster(self.session_id)
+        cluster_photos = {c.id: by_cluster.get(c.id, []) for c in clusters}
 
         # Load events
         events = self.store.get_events_by_session(self.session_id)
@@ -343,6 +363,10 @@ class MainWindow(QMainWindow):
         self.review_view.load_data(clusters, cluster_photos, has_undo, events=events)
         if prev_state:
             self.review_view.apply_view_state(prev_state)
+        # What the database holds right now — saves then write only the
+        # differences (PERF-11).
+        self._persisted_photos = {p.id: _photo_review_state(p) for p in all_photos}
+        self._persisted_clusters = {c.id: _cluster_review_state(c) for c in clusters}
 
         # Thumbnails in the background — the photos on screen first (PERF-08).
         shown = {p.id for p in self.review_view.shown_photos()}
@@ -405,12 +429,18 @@ class MainWindow(QMainWindow):
         """Flush verdicts and cluster review markers to SQLite."""
         if not self.store or not self.session_id:
             return
-        photos = self.review_view.get_all_photos()
+        photos = _changed(self.review_view.get_all_photos(), _photo_review_state,
+                          getattr(self, "_persisted_photos", None))
         if photos:
             self.store.update_photos_batch(photos)
-        clusters = self.review_view.get_all_clusters()
+            if getattr(self, "_persisted_photos", None) is not None:
+                self._persisted_photos.update({p.id: _photo_review_state(p) for p in photos})
+        clusters = _changed(self.review_view.get_all_clusters(), _cluster_review_state,
+                            getattr(self, "_persisted_clusters", None))
         if clusters:
             self.store.update_clusters_review_state(clusters)
+            if getattr(self, "_persisted_clusters", None) is not None:
+                self._persisted_clusters.update({c.id: _cluster_review_state(c) for c in clusters})
 
     # ── Apply ────────────────────────────────────────────
 

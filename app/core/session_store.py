@@ -417,6 +417,24 @@ class SessionStore:
         ).fetchall()
         return [self._row_to_photo(r) for r in rows]
 
+    def get_photos_grouped_by_cluster(self, session_id: str) -> dict[str, list[Photo]]:
+        """Every photo of a session grouped by cluster, in ONE query.
+
+        Same per-cluster order as get_photos_by_cluster (best score first),
+        with rowid as an explicit tiebreak. Loading the review screen used to
+        run one query per cluster — thousands on a large library (PERF-11).
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM photos WHERE session_id=? "
+            "ORDER BY cluster_id, quality_score DESC, rowid",
+            (session_id,),
+        ).fetchall()
+        grouped: dict[str, list[Photo]] = {}
+        for r in rows:
+            photo = self._row_to_photo(r)
+            grouped.setdefault(photo.cluster_id, []).append(photo)
+        return grouped
+
     def get_photos_by_cluster(self, cluster_id: str) -> list[Photo]:
         rows = self._conn.execute(
             "SELECT * FROM photos WHERE cluster_id=? ORDER BY quality_score DESC",
