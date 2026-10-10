@@ -46,6 +46,19 @@ REVIEW_SHORTCUTS = [
 ]
 
 
+class _ResizeWatcher(QObject):
+    """Calls `callback` whenever the watched widget is resized."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self._callback()
+        return False
+
+
 class _KeyPassthroughGuard(QObject):
     """Stops the view-wide single-key shortcuts from stealing keys that the
     focused control needs for its own navigation.
@@ -756,6 +769,10 @@ class ReviewView(QWidget):
         self._selected_photo_id: str | None = None   # anchor / primary
         self._selected_ids: set[str] = set()          # full multi-selection
         self._thumb_memory: OrderedDict[str, QPixmap] = OrderedDict()  # PERF-07 LRU
+        # Columns the grid is actually laid out in right now. Up/Down moves by
+        # this, not by what *would* fit, so it can never disagree with what
+        # the user sees (UX-23).
+        self._laid_out_columns = 1
         self._current_photos: list[Photo] = []  # Current cluster photos
         # Which photo ids pass the active filters (None = no filter). Kept so
         # the whole-batch view and batch actions share one filtered set.
@@ -1050,9 +1067,17 @@ class ReviewView(QWidget):
 
         self._grid_container = QWidget()
         self._grid_layout = QGridLayout(self._grid_container)
+        # Reflow the grid when the visible area changes width (window resize,
+        # maximise, splitter drag) — debounced so a drag reflows once (UX-23).
+        self._reflow_timer = QTimer(self)
+        self._reflow_timer.setSingleShot(True)
+        self._reflow_timer.setInterval(120)
+        self._reflow_timer.timeout.connect(self._reflow_if_needed)
+        self._resize_watcher = _ResizeWatcher(self._reflow_timer.start, self)
         self._grid_layout.setSpacing(8)
         self._grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._scroll.setWidget(self._grid_container)
+        self._scroll.viewport().installEventFilter(self._resize_watcher)
 
         splitter.addWidget(self._scroll)
         splitter.setStretchFactor(0, 0)
@@ -1347,6 +1372,22 @@ class ReviewView(QWidget):
 
         return columns
 
+    def _reflow_if_needed(self):
+        """Re-position the existing tiles when a different number of columns
+        now fits — no widgets are recreated and no images reloaded (UX-23)."""
+        if not self._thumb_widgets:
+            return
+        cols = self._get_grid_columns()
+        if cols == self._laid_out_columns:
+            return
+        widgets = [self._thumb_widgets[p.id] for p in self._current_photos
+                   if p.id in self._thumb_widgets]
+        for w in widgets:
+            self._grid_layout.removeWidget(w)
+        for i, w in enumerate(widgets):
+            self._grid_layout.addWidget(w, i // cols, i % cols)
+        self._laid_out_columns = cols
+
     def _show_shortcuts(self):
         ShortcutsHelpDialog(REVIEW_SHORTCUTS, self).exec()
 
@@ -1507,6 +1548,7 @@ class ReviewView(QWidget):
             self._grid_layout.addWidget(widget, row, col)
 
             self._thumb_widgets[photo.id] = widget
+        self._laid_out_columns = grid_columns
 
         if missing_previews:
             self.previews_requested.emit(missing_previews, display_size)
@@ -2476,7 +2518,7 @@ class ReviewView(QWidget):
         if not photos:
             return
         idx = self._selected_photo_index()
-        cols = self._get_grid_columns()
+        cols = self._laid_out_columns
         target = idx + direction * cols
         target = max(0, min(target, len(photos) - 1))
         if target != idx:
