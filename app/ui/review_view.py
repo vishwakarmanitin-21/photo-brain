@@ -639,6 +639,11 @@ class ThumbnailWidget(QFrame):
         self._render_pixmap()
 
     def set_selected(self, selected: bool):
+        # Restyling is the expensive part (several setStyleSheet calls), and the
+        # grid calls this on every tile whenever the selection moves — so a tile
+        # whose state did not change must not restyle (UX-18).
+        if selected == self._selected:
+            return
         self._selected = selected
         self._update_style()
 
