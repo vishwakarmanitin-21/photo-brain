@@ -66,7 +66,7 @@ class ThumbnailAccumulationTests(unittest.TestCase):
 
             removed = cache.prune({"KEEP"})
             self.assertEqual(1, removed)
-            self.assertEqual(["KEEP.jpg"], os.listdir(cache.cache_dir))
+            self.assertEqual(["KEEP.u1.jpg"], os.listdir(cache.cache_dir))
 
 
 class PreviewAccumulationTests(unittest.TestCase):
@@ -77,7 +77,7 @@ class PreviewAccumulationTests(unittest.TestCase):
             cache.generate_preview(_photo("id1", src, "SHA_A"), 400)
             cache.generate_preview(_photo("id2", src, "SHA_A"), 400)  # rescan
             files = os.listdir(cache.cache_dir)
-            self.assertEqual(["SHA_A_400.jpg"], files)
+            self.assertEqual(["SHA_A_400.u1.jpg"], files)
 
     def test_prune_keeps_all_sizes_of_current_photos(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -92,7 +92,7 @@ class PreviewAccumulationTests(unittest.TestCase):
             removed = cache.prune({"KEEP"})
             self.assertEqual(1, removed)
             self.assertEqual(
-                {"KEEP_400.jpg", "KEEP_800.jpg"},
+                {"KEEP_400.u1.jpg", "KEEP_800.u1.jpg"},
                 set(os.listdir(cache.cache_dir)),
             )
 

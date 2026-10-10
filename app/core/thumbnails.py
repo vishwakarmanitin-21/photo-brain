@@ -12,7 +12,7 @@ import logging
 import threading
 from typing import Callable, Optional
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.core.models import Photo
 # Register HEIF/HEIC with Pillow before any decode (FEAT-02).
@@ -23,6 +23,31 @@ log = logging.getLogger("photobrain.thumbnails")
 THUMB_SIZE = (200, 200)
 THUMB_QUALITY = 85
 PREVIEW_QUALITY = 92
+
+# Cache file format tag. Bumped when the rendering of cached images changes,
+# so files made the old way are never shown again and the next prune removes
+# them (their names no longer parse as a valid key). "u1" = upright: the EXIF
+# orientation is applied (UX-16) — earlier files showed phone portraits sideways.
+CACHE_FORMAT = "u1"
+
+
+def _open_for_display(filepath: str, max_dim: int) -> Image.Image:
+    """Decode a photo for an on-screen copy at most max_dim on its long side.
+
+    * `draft()` lets the JPEG decoder decode at 1/2, 1/4 or 1/8 scale (never
+      below the requested size), so a 9-48 MP original is not fully decoded
+      just to be shrunk — measured ~2.5-3x faster per thumbnail on real 9 MP
+      phone photos (PERF-08).
+    * `exif_transpose` shows the photo the way the camera intended (UX-16).
+      Only the cached copy is rotated; the original file is never touched.
+    """
+    img = Image.open(filepath)
+    img.draft("RGB", (max_dim, max_dim))
+    upright = ImageOps.exif_transpose(img)
+    rgb = upright.convert("RGB")
+    rgb.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    img.close()
+    return rgb
 
 
 def cache_key(photo: Photo) -> str:
@@ -40,18 +65,16 @@ class ThumbnailCache:
         os.makedirs(cache_dir, exist_ok=True)
 
     def get_thumb_path(self, photo: Photo) -> Optional[str]:
-        path = os.path.join(self.cache_dir, f"{cache_key(photo)}.jpg")
+        path = os.path.join(self.cache_dir, _thumb_name(cache_key(photo)))
         return path if os.path.isfile(path) else None
 
     def generate_thumbnail(self, photo: Photo) -> Optional[str]:
-        dest = os.path.join(self.cache_dir, f"{cache_key(photo)}.jpg")
+        dest = os.path.join(self.cache_dir, _thumb_name(cache_key(photo)))
         if os.path.isfile(dest):
             return dest
         try:
-            with Image.open(photo.filepath) as img:
-                img = img.convert("RGB")
-                img.thumbnail(THUMB_SIZE, Image.LANCZOS)
-                img.save(dest, "JPEG", quality=THUMB_QUALITY)
+            img = _open_for_display(photo.filepath, max(THUMB_SIZE))
+            img.save(dest, "JPEG", quality=THUMB_QUALITY)
             return dest
         except Exception as e:
             log.warning("Thumbnail failed for %s: %s", photo.filepath, e)
@@ -97,30 +120,21 @@ class PreviewCache:
 
     def get_preview_path(self, photo: Photo, display_size: int) -> Optional[str]:
         path = os.path.join(
-            self.cache_dir, f"{cache_key(photo)}_{display_size}.jpg"
+            self.cache_dir, _preview_name(cache_key(photo), display_size)
         )
         return path if os.path.isfile(path) else None
 
     def generate_preview(self, photo: Photo, display_size: int) -> Optional[str]:
         """Decode and resize an original image into the requested cache entry."""
         dest = os.path.join(
-            self.cache_dir, f"{cache_key(photo)}_{display_size}.jpg"
+            self.cache_dir, _preview_name(cache_key(photo), display_size)
         )
         if os.path.isfile(dest):
             return dest
         temp_path = f"{dest}.{threading.get_ident()}.tmp"
         try:
-            with Image.open(photo.filepath) as image:
-                image = image.convert("RGB")
-                image.thumbnail(
-                    (display_size, display_size),
-                    Image.Resampling.LANCZOS,
-                )
-                image.save(
-                    temp_path,
-                    format="JPEG",
-                    quality=PREVIEW_QUALITY,
-                )
+            image = _open_for_display(photo.filepath, display_size)
+            image.save(temp_path, format="JPEG", quality=PREVIEW_QUALITY)
             os.replace(temp_path, dest)
             return dest
         except Exception as error:
@@ -143,22 +157,38 @@ class PreviewCache:
 
 # ── Shared cache-file helpers ────────────────────────────────────────
 
+_SUFFIX = f".{CACHE_FORMAT}.jpg"
+
+
+def _thumb_name(key: str) -> str:
+    return f"{key}{_SUFFIX}"
+
+
+def _preview_name(key: str, display_size: int) -> str:
+    return f"{key}_{display_size}{_SUFFIX}"
+
+
 def _thumb_key_of(filename: str) -> Optional[str]:
-    """Key for a thumbnail file: '<key>.jpg' -> '<key>'."""
-    if not filename.endswith(".jpg"):
+    """Key for a thumbnail file: '<key>.<format>.jpg' -> '<key>'.
+
+    Files in an older format (e.g. the sideways '<key>.jpg') return None, so
+    prune() removes them like any other unrecognised file.
+    """
+    if not filename.endswith(_SUFFIX):
         return None
-    return filename[: -len(".jpg")]
+    return filename[: -len(_SUFFIX)]
 
 
 def _preview_key_of(filename: str) -> Optional[str]:
-    """Key for a preview file: '<key>_<size>.jpg' -> '<key>'.
+    """Key for a preview file: '<key>_<size>.<format>.jpg' -> '<key>'.
 
     Cache keys (sha256 / 12-hex id) never contain '_', so splitting on the
-    last underscore recovers the key regardless of the size suffix.
+    last underscore recovers the key regardless of the size suffix. Older
+    formats return None and are pruned.
     """
-    if not filename.endswith(".jpg"):
+    if not filename.endswith(_SUFFIX):
         return None
-    stem = filename[: -len(".jpg")]
+    stem = filename[: -len(_SUFFIX)]
     if "_" not in stem:
         return None
     return stem.rsplit("_", 1)[0]

@@ -332,16 +332,22 @@ class MainWindow(QMainWindow):
         apply_log = self.store.get_apply_log(self.session_id)
         has_undo = len(apply_log) > 0
 
+        all_photos = []
+        for photos in cluster_photos.values():
+            all_photos.extend(photos)
+        # Prune BEFORE the grid is built: cache files in an outdated format
+        # (e.g. the sideways pre-UX-16 thumbnails) must be gone before tiles
+        # load from photo.thumb_path, or they would flash up first.
+        self._prune_caches(all_photos)
+
         self.review_view.load_data(clusters, cluster_photos, has_undo, events=events)
         if prev_state:
             self.review_view.apply_view_state(prev_state)
 
-        # Start thumbnail generation in background
-        all_photos = []
-        for photos in cluster_photos.values():
-            all_photos.extend(photos)
-        self._prune_caches(all_photos)
-        self._start_thumb_worker(all_photos)
+        # Thumbnails in the background — the photos on screen first (PERF-08).
+        shown = {p.id for p in self.review_view.shown_photos()}
+        ordered = sorted(all_photos, key=lambda p: p.id not in shown)  # stable
+        self._start_thumb_worker(ordered)
 
         self._navigate(VIEW_REVIEW)
 
@@ -368,6 +374,7 @@ class MainWindow(QMainWindow):
             self.thumb_worker.wait(2000)
         self.thumb_worker = ThumbWorker(photos, self.thumb_cache)
         self.thumb_worker.thumb_ready.connect(self.review_view.on_thumb_ready)
+        self.thumb_worker.progress_updated.connect(self.review_view.set_thumb_progress)
         self.thumb_worker.start()
 
     @Slot(object, int)

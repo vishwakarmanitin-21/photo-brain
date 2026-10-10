@@ -1031,6 +1031,12 @@ class ReviewView(QWidget):
         self._progress_label.setStyleSheet("font-size: 11px; font-weight: bold;")
         filter_bar.addWidget(self._progress_label)
 
+        # "Preparing thumbnails… N of M" while the background worker runs;
+        # empty (zero width) otherwise (PERF-08).
+        self._thumb_status = QLabel("")
+        self._thumb_status.setStyleSheet("font-size: 11px; color: gray;")
+        filter_bar.addWidget(self._thumb_status)
+
         filter_bar.addSpacing(10)
 
         self._filter_status = QLabel("")
@@ -1613,6 +1619,14 @@ class ReviewView(QWidget):
         self._apply_filters()
 
     @Slot(str, str)
+    def shown_photos(self) -> list[Photo]:
+        """The photos currently laid out in the grid, in display order."""
+        return list(self._current_photos)
+
+    def set_thumb_progress(self, done: int, total: int):
+        self._thumb_status.setText(
+            "" if done >= total else f"  Preparing thumbnails… {done:,} of {total:,}")
+
     def on_thumb_ready(self, photo_id: str, thumb_path: str):
         widget = self._thumb_widgets.get(photo_id)
         if not widget or not os.path.isfile(thumb_path):
