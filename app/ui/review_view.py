@@ -1,6 +1,7 @@
 """Review view — cluster list + thumbnail grid with keyboard shortcuts."""
 import os
 import logging
+from collections import OrderedDict
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget,
@@ -243,6 +244,16 @@ VIEW_OPTIONS = [VIEW_GROUPS, VIEW_ALL]
 # libraries). When it bites, the lowest-quality tail is what's dropped from
 # the grid — it is still counted and still swept by batch actions.
 MAX_FLAT_GRID = 600
+
+# Search waits for a pause in typing before filtering: each filter pass
+# rebuilds the group list and the grid, so filtering per keystroke made
+# typing stall (PERF-07).
+SEARCH_DEBOUNCE_MS = 250
+
+# Decoded 200 px thumbnails kept in memory, so switching groups, filters or
+# zooming back out re-uses them instead of re-reading every file from disk.
+# ~120 KB each; 1,000 covers a full 600-tile flat view with room to spare.
+THUMB_MEMORY_CACHE = 1000
 
 # Compare shows photos side by side at a size where focus and eyes can be
 # judged; past this many they are too small to compare and slow to open.
@@ -744,6 +755,7 @@ class ReviewView(QWidget):
         self._current_cluster_idx = -1
         self._selected_photo_id: str | None = None   # anchor / primary
         self._selected_ids: set[str] = set()          # full multi-selection
+        self._thumb_memory: OrderedDict[str, QPixmap] = OrderedDict()  # PERF-07 LRU
         self._current_photos: list[Photo] = []  # Current cluster photos
         # Which photo ids pass the active filters (None = no filter). Kept so
         # the whole-batch view and batch actions share one filtered set.
@@ -967,7 +979,12 @@ class ReviewView(QWidget):
         self._search_box.setPlaceholderText("filename…")
         self._search_box.setClearButtonEnabled(True)
         self._search_box.setMaximumWidth(160)
-        self._search_box.textChanged.connect(self._apply_filters)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DEBOUNCE_MS)
+        self._search_timer.timeout.connect(self._apply_filters)
+        self._search_box.textChanged.connect(self._on_search_text_changed)
+        self._search_box.returnPressed.connect(self.flush_search)
         filter_bar.addWidget(self._search_box)
 
         filter_bar.addSpacing(15)
@@ -1467,12 +1484,12 @@ class ReviewView(QWidget):
                 pixmap = self._preview_pixmaps.get(photo.id, QPixmap())
                 if pixmap.isNull():
                     if photo.thumb_path and os.path.isfile(photo.thumb_path):
-                        pixmap = QPixmap(photo.thumb_path)
+                        pixmap = self._thumb_pixmap(photo.thumb_path)
                     missing_previews.append(photo)
             else:
                 # Use cached 200×200 for smaller sizes
                 if photo.thumb_path and os.path.isfile(photo.thumb_path):
-                    pixmap = QPixmap(photo.thumb_path)
+                    pixmap = self._thumb_pixmap(photo.thumb_path)
                 else:
                     pixmap = QPixmap()
 
@@ -1598,6 +1615,31 @@ class ReviewView(QWidget):
         self._thumb_status.setText(
             "" if done >= total else f"  Preparing thumbnails… {done:,} of {total:,}")
 
+    def _on_search_text_changed(self, text: str):
+        if text:
+            self._search_timer.start()      # restart: filter once typing pauses
+        else:
+            self.flush_search()             # cleared: show everything at once
+
+    def flush_search(self):
+        """Apply a pending search now (Enter, clear button, tests)."""
+        self._search_timer.stop()
+        self._apply_filters()
+
+    def _thumb_pixmap(self, path: str) -> QPixmap:
+        """Decoded thumbnail from the in-memory LRU, reading disk only once."""
+        cache = self._thumb_memory
+        pixmap = cache.get(path)
+        if pixmap is not None:
+            cache.move_to_end(path)
+            return pixmap
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            cache[path] = pixmap
+            if len(cache) > THUMB_MEMORY_CACHE:
+                cache.popitem(last=False)
+        return pixmap
+
     def on_thumb_ready(self, photo_id: str, thumb_path: str):
         widget = self._thumb_widgets.get(photo_id)
         if not widget or not os.path.isfile(thumb_path):
@@ -1606,7 +1648,7 @@ class ReviewView(QWidget):
         # user already zoomed into.
         if widget._display_size > THUMB_CACHE_SIZE:
             return
-        pixmap = QPixmap(thumb_path)
+        pixmap = self._thumb_pixmap(thumb_path)
         if not pixmap.isNull():
             widget.set_pixmap(pixmap)
 

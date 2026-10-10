@@ -68,6 +68,7 @@ class SearchAndProgressTests(unittest.TestCase):
     def test_search_narrows_to_matching_groups(self):
         rv = self._view()
         rv._search_box.setText("beach")
+        rv.flush_search()                   # typing is debounced (PERF-07)
         self.assertEqual(["c1"], [c.id for c in rv._clusters])
         rv._search_box.setText("")  # cleared → all groups
         self.assertEqual({"c1", "c2"}, {c.id for c in rv._clusters})
