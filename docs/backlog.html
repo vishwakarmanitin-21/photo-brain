@@ -706,7 +706,7 @@
       <h3>Waiting on Nitin</h3>
       <ul>
         <li><b>(10 Oct) Add a "does this look like a good photo" model? (RANK-09)</b> Options: <i>none</i> (download stays ~120 MB; ranking stays "junk filter + faces"), <i>small</i> (~20–30 MB extra; a modest gain on composition/light), or <i>CLIP-based</i> (~150–350 MB extra; the biggest gain, and it also enables same-moment grouping, content search and learning your taste). All run offline. <b>Recommendation: CLIP-based</b> — it is the only option that makes "shortlist my best photos" work on scenery, and its extra uses pay for the download size. Decide after RANK-01 so the gain can be measured.</li><li><b>(10 Oct) Hold the public launch until the ranking is measured?</b> Recommendation: yes — ADOPT-04/05/07 wait for RANK-01–06.</li>
-        <li><b>Pick a real photo folder for the ranking test set</b> (vault task T-137) — RANK-01 needs ~300–1000 of your own photos with bursts and people. Nothing leaves your computer.</li>
+        <li><b>Label photos for the ranking scorecard (~45 min, any number of sittings)</b> (vault task T-137) — run <code>venv\Scripts\python scripts\label_photos.py "D:\OneDrive\Pictures\Camera Roll"</code>, star the best shot in each burst. Everything else for RANK-01 is built; the first real numbers come from your labels.</li>
       </ul>
     </div>
   </div>
@@ -1087,7 +1087,7 @@ const ITEMS = [
   {
     id: "RANK-01",
     title: "There is no way to measure whether the ranking is any good — build a scorecard against real human picks first",
-    status: "open",
+    status: "in-progress",
     priority: "P0",
     severity: "Critical",
     category: "ranking",
@@ -1098,7 +1098,9 @@ const ITEMS = [
     ifIgnored: "Ranking changes stay guesses, and a fix for one kind of photo can quietly break another. July's 'it works now' verdict is what that looks like.",
     summary: "Every weight (45/13/10/12/9/5/4/2), the junk bar (0.25), the keep gap (0.05) and the grouping threshold (17 → 11 on 19 Jul, without re-running the CLUST-02 check that justified 17) was set by eye on a few examples. Without a measurement, each fix below is a guess and can quietly make other photos worse. Fix: (a) a labelled set — 20–30 real bursts/groups plus ~100 singles from Nitin's own library, each marked \"keep / reject / best\"; (b) the app already records every manual override (`user_override`) — add an \"Export my picks\" that writes them as labels, so normal use grows the set; (c) `scripts/eval_ranking.py` reporting best-of-group agreement, pairwise agreement, and junk caught / good photos wrongly flagged; (d) run it in `scripts/check.py` so a scoring change that lowers agreement fails the pre-push gate. Local only; labels never leave the machine. **Needs Nitin for (a): ~45 min of picking.**",
     files: ["scripts/eval_ranking.py (new)", "core/session_store.py", "scripts/check.py"],
+    progress: "BUILT 2026-10-10 — the code half is done; the labels half waits on Nitin. **Labelling window** `scripts/label_photos.py <folder>`: blind (no scores on screen), one burst per page, ★ best / keep / redundant / junk, saves as you go to `<folder>\\.photobrain\\ranking-labels.json`, shuffled across the whole folder so a short session is a fair sample. **Scorecard** `scripts/eval_ranking.py <folder>`: runs the app's real pipeline (now shared in `app/core/pipeline.py`, so the scan worker and the scorecard cannot drift) and reports best-pick vs chance, pairwise order, junk caught, false alarms, keep/set-aside agreement, shortlist precision. **Gate**: `tests/test_ranking_baseline.py` fails when any scoring file changes without a fresh `docs/ranking-baseline.json`; `--update-baseline` refuses a worse result on the same labels unless `--accept-regression`. Both catches were proven by forcing them. MEASURED on Nitin's Camera Roll (8,490 photos 2024-2026): a 120 s moment gap chained whole outings into 160-photo runs (burst mode every ~3 s), so moments are 10 s apart and capped at 8 frames: 1,831 burst pages + 1,250 singles. First index 7 min (date cache makes re-opening 2 s); scorecard ~1 s per labelled photo. NOT DONE: no real labels yet, so no baseline and no real numbers. Dry-run used placeholder labels on copied photos only (deleted). Remaining: Nitin labels (~45 min), then the first scorecard run sets the baseline.",
     createdAt: "2026-10-10",
+    updatedAt: "2026-10-10",
   },
   {
     id: "RANK-02",
@@ -2235,6 +2237,23 @@ const ITEMS = [
     ifIgnored: "The shortlist fills with near-identical frames.",
     summary: "The similarity fingerprint (pHash) only sees coarse light/dark layout, so a small reframe, zoom or a person stepping in pushes two frames of the same moment past the threshold — and the threshold was tightened 17 → 11 in July without re-measuring. Each fragment is then auto-kept on its own. Fix: decide \"same moment\" from capture time adjacency (seconds apart) plus a content similarity that tolerates reframing — CLIP embeddings from RANK-09, or ORB feature matching if RANK-09 is declined — and measure the threshold on the RANK-01 set. Supersedes CLUST-03's \"hint\" with an actual grouping.",
     files: ["core/clustering.py", "core/hashing.py"],
+    createdAt: "2026-10-10",
+  },
+  {
+    id: "CLUST-05",
+    title: "Capture time is read from the 'last modified' field, not 'date taken'",
+    status: "open",
+    priority: "P2",
+    severity: "Medium",
+    category: "clustering",
+    kind: "bug",
+    effort: "S (~1 day)",
+    verified: true,
+    plainSummary: "To know when a photo was taken, the app reads a field that really records when the file was last saved. For photos straight off the phone the two match; for edited, exported or re-saved photos it is the edit time.",
+    benefit: "Bursts, events and the 30-minute 'same moment' check use the real time the photo was taken.",
+    ifIgnored: "Edited or re-saved photos get the wrong time, so they can be grouped with the wrong shots or split from the right ones. Unedited phone photos are unaffected today.",
+    summary: "`extract_exif_datetime` (app/core/events.py) looks for DateTimeOriginal (36867) and DateTimeDigitized (36868) in `img.getexif()`, which only returns the main IFD0 block — on real photos both tags live in the Exif sub-IFD (0x8769), so they are never found and the code falls back to IFD0 DateTime (306), the file-modification time. MEASURED 2026-10-10 on 12 photos sampled across Nitin's 2025 Camera Roll: DateTimeOriginal absent from IFD0 in 12 of 12, present in the Exif sub-IFD in 12 of 12; DateTime matched it in 12 of 12 because these are unedited phone originals. Fix: read `exif.get_ifd(0x8769)` first, then fall back to IFD0 DateTime; add a test with a JPEG whose DateTimeOriginal differs from DateTime. Affects the capture-time gate in clustering, events and the ranking scorecard's moments — a scoring-relevant file, so re-run the scorecard (RANK-01) with the fix.",
+    files: ["app/core/events.py:26-49"],
     createdAt: "2026-10-10",
   },
 ];

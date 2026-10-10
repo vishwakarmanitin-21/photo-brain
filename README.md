@@ -220,6 +220,39 @@ crisper frame, while a genuinely blurred frame still loses to a sharp one.
 Photos without faces compete on sharpness and exposure only. Unreadable
 files are left "undecided" for manual review instead of being auto-kept.
 
+## Measuring the ranking (scorecard)
+
+How good are the picks, really? The **ranking scorecard** answers that with a
+number instead of an opinion, by comparing the app's choices with yours on
+your own photos. Everything stays on your computer.
+
+1. **Label a sample of your photos — blind.**
+   ```
+   venv\Scripts\python scripts\label_photos.py "D:\Path\To\Photos"
+   ```
+   A window shows one burst (photos taken seconds apart) at a time, with no
+   app scores on screen. Star the shot you would keep (**1** or click), mark
+   weaker near-copies **Redundant** (**3**) and bad shots **Junk** (**4**);
+   anything unmarked counts as Keep. **Enter** saves and moves on. Bursts come
+   in a shuffled order across the whole folder, so even 30 minutes gives a fair
+   sample; single photos follow. Labels save as you go to
+   `<folder>\.photobrain\ranking-labels.json` — stop and resume any time.
+2. **Run the scorecard.**
+   ```
+   venv\Scripts\python scripts\eval_ranking.py "D:\Path\To\Photos"
+   ```
+   It runs the app's real scan pipeline over the labelled photos (read-only;
+   about 1 s per photo) and reports, in plain words: how often the app's top
+   photo in a burst is one you starred (with what a random pick would score),
+   how often it orders photo pairs the way you did, how much of your junk it
+   flags, how many photos you'd keep it would wrongly flag or set aside, and
+   how many of its top picks you starred.
+3. **Changing the scoring?** Re-run with `--update-baseline` and commit
+   `docs/ranking-baseline.json` (aggregate numbers only — no file names). The
+   test suite fails if scoring code changes without a fresh baseline, and the
+   script refuses to record a result that got worse on the same labels unless
+   you pass `--accept-regression` and say why.
+
 ## Project Structure
 
 ```
@@ -236,7 +269,9 @@ photo-brain/
       hashing.py                # SHA256 + perceptual hash computation
       clustering.py             # Union-Find clustering algorithm
       scoring.py                # Image quality scoring (sharpness + brightness + faces + isolation)
-      scanner.py                # Scan pipeline orchestrator
+      scanner.py                # Scan phase functions (hash, score, faces, dates, cluster, verdicts)
+      pipeline.py               # The scan pipeline, shared by the app and the ranking scorecard
+      ranking_eval.py           # Ranking scorecard: moments, labels, metrics, baseline gate
       faces.py                  # Multi-scale face detection + expression analysis (mediapipe)
       events.py                 # EXIF date/time extraction + event grouping
       thumbnails.py             # Thumbnail cache management
@@ -248,9 +283,11 @@ photo-brain/
       scan_view.py              # Scan progress screen with live stats
       review_view.py            # Photo review screen with filters
       dialogs.py                # Settings, confirmation, and result dialogs
+      ranking_label_window.py   # Blind labelling window for the ranking scorecard
     workers/
       scan_worker.py            # Background scan thread
       thumb_worker.py           # Background thumbnail generation thread
+      label_index_worker.py     # Background photo indexing for the labelling window
     util/
       paths.py                  # Path utilities and constants
       logging_util.py           # Logging configuration
