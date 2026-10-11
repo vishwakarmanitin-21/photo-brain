@@ -149,11 +149,19 @@ def labels_path(root: str) -> str:
 
 
 class LabelStore:
-    """The person's labels for one photo root, persisted atomically."""
+    """The person's labels for one photo root, persisted atomically.
+
+    Suggested labels (e.g. pre-labelled by Claude so the person reviews instead
+    of starting from scratch) live in `suggestions`, separate from `labels`:
+    they never count as the answer key until the person confirms the moment
+    in the label window, which moves them into `labels` (recording what was
+    suggested, so the scorecard can report how often a suggestion was changed).
+    """
 
     def __init__(self, path: str):
         self.path = path
-        self.labels: dict[str, dict] = {}       # rel path -> {label, sha256, moment, at}
+        self.labels: dict[str, dict] = {}       # rel path -> {label, sha256, moment, at[, suggested]}
+        self.suggestions: dict[str, dict] = {}  # rel path -> {label, moment, by, at}
         self.reviewed_moments: set[str] = set()  # moment ids saved at least once
         self.skipped_moments: set[str] = set()   # moment ids the person chose to skip
         if os.path.isfile(path):
@@ -165,6 +173,7 @@ class LabelStore:
         if data.get("version") != LABELS_VERSION:
             raise ValueError(f"Unsupported labels file version in {self.path}")
         self.labels = data.get("labels", {})
+        self.suggestions = data.get("suggestions", {})
         self.reviewed_moments = set(data.get("reviewed_moments", []))
         self.skipped_moments = set(data.get("skipped_moments", []))
 
@@ -175,6 +184,7 @@ class LabelStore:
             "note": "PhotoBrain ranking scorecard labels (RANK-01). Keys are paths "
                     "relative to the folder that holds this .photobrain directory.",
             "labels": dict(sorted(self.labels.items())),
+            "suggestions": dict(sorted(self.suggestions.items())),
             "reviewed_moments": sorted(self.reviewed_moments),
             "skipped_moments": sorted(self.skipped_moments),
         }
@@ -190,10 +200,32 @@ class LabelStore:
             label = labels.get(rel, "keep")
             if label not in LABELS:
                 raise ValueError(f"Unknown label {label!r}")
-            self.labels[rel] = {"label": label, "sha256": shas.get(rel),
-                                "moment": moment.id, "at": now}
+            entry = {"label": label, "sha256": shas.get(rel), "moment": moment.id, "at": now}
+            suggested = self.suggestions.get(rel)
+            if suggested:
+                entry["suggested"] = suggested["label"]
+                entry["suggested_by"] = suggested.get("by", "")
+            self.labels[rel] = entry
         self.reviewed_moments.add(moment.id)
         self.skipped_moments.discard(moment.id)
+
+    def suggest_moment(self, moment: Moment, labels: dict[str, str], by: str):
+        """Store suggested labels for a moment (unmarked photos = 'keep').
+        They are NOT labels until the person confirms the moment."""
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for rel in moment.paths:
+            label = labels.get(rel, "keep")
+            if label not in LABELS:
+                raise ValueError(f"Unknown label {label!r}")
+            self.suggestions[rel] = {"label": label, "moment": moment.id, "by": by, "at": now}
+
+    def suggestion_for(self, rel: str) -> Optional[str]:
+        entry = self.suggestions.get(rel)
+        return entry["label"] if entry else None
+
+    def pending_suggested_moments(self) -> set[str]:
+        """Moments with suggestions the person has not yet confirmed."""
+        return {e["moment"] for e in self.suggestions.values()} - self.reviewed_moments
 
     def skip_moment(self, moment: Moment):
         self.skipped_moments.add(moment.id)
@@ -212,6 +244,28 @@ class LabelStore:
 
 
 # ───────────────────────────── metrics ─────────────────────────────
+
+def suggestion_agreement(labels: dict[str, dict]) -> dict:
+    """How often the person kept a suggested label when confirming it.
+
+    Reported separately from the app's scorecard: it says how much of the
+    answer key came from suggestions the person accepted, so a reader can
+    judge how independent it is.
+    """
+    checked = {rel: e for rel, e in labels.items() if "suggested" in e}
+    changed = sorted(rel for rel, e in checked.items() if e["suggested"] != e["label"])
+    moments: dict[str, list] = {}
+    for rel, e in checked.items():
+        moments.setdefault(e["moment"], []).append(e)
+    best_changed = sum(
+        1 for entries in moments.values()
+        if {id(e) for e in entries if e["label"] == "best"} != {id(e) for e in entries if e["suggested"] == "best"}
+    )
+    return {"photos": len(checked), "photos_changed": len(changed),
+            "kept_rate": _ratio(len(checked) - len(changed), len(checked)),
+            "moments": len(moments), "moments_best_changed": best_changed,
+            "changed_examples": changed[:10]}
+
 
 def app_flags_junk(photo: Photo) -> bool:
     """The app's 'this photo is no good' signal: below the low-quality bar,

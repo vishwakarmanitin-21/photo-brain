@@ -36,6 +36,9 @@ SERIES_HELP = ("<b>Pick the shot you would keep.</b> Click a photo (or use the a
                "Mark weaker near-copies <b>Redundant</b> (<b>3</b>) and bad photos <b>Junk</b> (<b>4</b>); "
                "anything unmarked counts as Keep (<b>2</b>). <b>Enter</b> save &amp; next · <b>S</b> skip · "
                "<b>Backspace</b> back · <b>O</b> or double-click opens full size.")
+SUGGESTED_PREFIX = ("<span style='color:#7c3aed'><b>Claude's suggestion — please check it.</b> "
+                    "Change any photo you disagree with; press <b>Enter</b> to confirm the page as yours. "
+                    "Only confirmed pages count.</span><br>")
 SINGLES_HELP = ("<b>Mark the bad ones.</b> Select a photo (click or arrow keys) and press <b>4</b> or "
                 "<b>Space</b> for <b>Junk</b> (blurry, dark, accidental, useless); <b>1</b> for one you think "
                 "is genuinely great (★ Best). Anything unmarked counts as Keep. <b>Enter</b> saves the page.")
@@ -115,8 +118,11 @@ class _Tile(QFrame):
         pix.setDevicePixelRatio(ratio)
         self.image.setPixmap(pix)
 
-    def set_label(self, label):
+    def set_label(self, label, suggested: bool = False):
+        """`suggested` marks a label pre-filled from a suggestion the person
+        has not yet changed — shown as such so it is never mistaken for theirs."""
         self._label = label
+        self._suggested = suggested
         self._restyle()
 
     def set_focused(self, focused: bool):
@@ -127,8 +133,11 @@ class _Tile(QFrame):
         shown = self._label or "keep"
         color = LABEL_COLOR[shown] if self._label else "#9ca3af"
         text = LABEL_TEXT[shown] + ("" if self._label else " (default)")
+        if getattr(self, "_suggested", False):
+            text += "  ·  Claude's pick"
         self.badge.setText(text)
-        self.badge.setStyleSheet(f"font-weight: bold; color: {color};")
+        style = "italic" if getattr(self, "_suggested", False) else "normal"
+        self.badge.setStyleSheet(f"font-weight: bold; font-style: {style}; color: {color};")
         outline = "#2563eb" if self._focused else color
         self.setStyleSheet(f"_Tile {{ border: 3px solid {outline}; border-radius: 6px; }}")
 
@@ -143,6 +152,7 @@ class RankingLabelWindow(QMainWindow):
         self.page_idx = 0
         self.token = 0
         self.current: dict[str, str | None] = {}
+        self.suggested_rels: set[str] = set()
         self.shas: dict[str, str] = {}
         self.tiles: list[_Tile] = []
         self.cols = 1
@@ -209,6 +219,10 @@ class RankingLabelWindow(QMainWindow):
         series = [m for m in ordered if m.is_series]
         singles = [m for m in ordered if not m.is_series]
         self.series_ids = {m.id for m in series}
+        # Bursts with suggestions waiting for review come first, so reviewing
+        # Claude's picks is the first thing the window asks for.
+        pending = self.store.pending_suggested_moments()
+        series = [m for m in series if m.id in pending] + [m for m in series if m.id not in pending]
         self.pages = [[m] for m in series] + [
             singles[i:i + SINGLES_PER_PAGE] for i in range(0, len(singles), SINGLES_PER_PAGE)
         ]
@@ -242,6 +256,16 @@ class RankingLabelWindow(QMainWindow):
         page = self.pages[idx]
         rels = [r for m in page for r in m.paths]
         self.current = {r: self.store.label_of(r) for r in rels}
+        # Not yet confirmed: pre-fill from suggestions, marked as such.
+        self.suggested_rels = set()
+        for m in page:
+            if m.id in self.store.reviewed_moments:
+                continue
+            for r in m.paths:
+                suggestion = self.store.suggestion_for(r)
+                if suggestion and self.current.get(r) is None:
+                    self.current[r] = suggestion
+                    self.suggested_rels.add(r)
         series = self._is_series_page()
         self.cols = min(len(rels), COLUMNS)
         edge = self._tile_edge(len(rels))
@@ -251,7 +275,7 @@ class RankingLabelWindow(QMainWindow):
                          on_click=lambda r=rel: self._select(r),
                          on_open=lambda r=rel: self._open(r),
                          on_set=lambda lab, r=rel: self._set(r, lab))
-            tile.set_label(self.current[rel])
+            tile.set_label(self.current[rel], suggested=rel in self.suggested_rels)
             self.grid.addWidget(tile, i // self.cols, i % self.cols)
             self.tiles.append(tile)
             decode_px = int(edge * max(1.0, self.devicePixelRatioF()))
@@ -262,7 +286,7 @@ class RankingLabelWindow(QMainWindow):
             m = page[0]
             when = (m.start or "").replace("T", " ")[:16] or "unknown time"
             self.title.setText(f"Series {idx + 1:,} of {len(self.series_ids):,} — {len(rels)} photos taken {when}")
-            self.help.setText(SERIES_HELP)
+            self.help.setText(SUGGESTED_PREFIX + SERIES_HELP if self.suggested_rels else SERIES_HELP)
         else:
             n_single_pages = len(self.pages) - len(self.series_ids)
             k = idx - len(self.series_ids) + 1
@@ -298,13 +322,16 @@ class RankingLabelWindow(QMainWindow):
 
     def _update_status(self):
         series_done = len(self.series_ids & self.store.reviewed_moments)
+        pending = len(self.store.pending_suggested_moments())
+        waiting = f" · {pending:,} of Claude's suggested bursts to check" if pending else ""
         self.status.setText(
             f"Labelled so far: {len(self.store.labels):,} photos · {series_done:,} of "
-            f"{len(self.series_ids):,} series · saved to {self.store.path}")
+            f"{len(self.series_ids):,} series{waiting} · saved to {self.store.path}")
 
     # ── labelling ──
     def _set(self, rel: str, label: str):
         self.current[rel] = label
+        self.suggested_rels.discard(rel)   # now the person's own choice
         self.dirty = True
         for i, tile in enumerate(self.tiles):
             if tile.rel == rel:

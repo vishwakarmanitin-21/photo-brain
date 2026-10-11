@@ -32,6 +32,7 @@ sys.path.insert(0, ROOT)
 from app.core.pipeline import AnalysisOptions, PipelineHooks, analyze  # noqa: E402
 from app.core.ranking_eval import (  # noqa: E402
     HEADLINES, LabelStore, compute_metrics, headline, labels_path, regressions,
+    suggestion_agreement,
     scorer_fingerprint,
 )
 
@@ -169,6 +170,8 @@ def public_metrics(metrics: dict) -> dict:
     out = json.loads(json.dumps(metrics))
     for key in ("wanted_set_aside_examples", "unwanted_kept_examples"):
         out["verdicts"].pop(key, None)
+    if "suggestions" in out:
+        out["suggestions"].pop("changed_examples", None)
     return out
 
 
@@ -195,6 +198,14 @@ def main() -> int:
             baseline = json.load(fh)
     same_labels = bool(baseline) and baseline.get("labels_fingerprint") == store.fingerprint()
     report(metrics, baseline if same_labels else None)
+    agreement = suggestion_agreement(store.labels)
+    metrics["suggestions"] = agreement
+    if agreement["photos"]:
+        print(f"\n  Pre-labelled by Claude and confirmed by you: {agreement['photos']:,} photos in "
+              f"{agreement['moments']:,} bursts. You kept {agreement['kept_rate']:.0%} of the suggested labels and "
+              f"changed the best pick in {agreement['moments_best_changed']} of {agreement['moments']} bursts.")
+        print("  (A high keep rate is expected when the suggestions are good; it also means part of the answer key")
+        print("   started as Claude's judgement — read the scorecard with that in mind.)")
     if baseline and not same_labels:
         print(f"\n  Labels changed since the baseline ({baseline.get('photos_graded')} -> "
               f"{metrics['photos_graded']} photos), so numbers are not compared.")
