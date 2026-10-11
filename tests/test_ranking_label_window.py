@@ -45,6 +45,9 @@ class LabelWindowTests(unittest.TestCase):
             _shot(root, "lone.jpg", "2024:09:01 10:00:00", (120, 120, 120))
             with patch.dict(os.environ, {"LOCALAPPDATA": local}):
                 window = RankingLabelWindow(root)
+                window.show()
+                window.activateWindow()
+                self.addCleanup(window.close)
                 self.assertTrue(self._wait(lambda: bool(window.tiles)), "window never indexed")
                 # The burst comes first, alone on its page.
                 self.assertEqual(["b1.jpg", "b2.jpg", "b3.jpg"], [t.rel for t in window.tiles])
@@ -55,8 +58,9 @@ class LabelWindowTests(unittest.TestCase):
                 for score_word in ("Quality", "/100", "score", "Score"):
                     self.assertNotIn(score_word, shown)
 
-                window._click("b2.jpg")                       # star b2
-                window.focus = 2
+                window._select("b2.jpg")                      # a click selects…
+                QTest.keyClick(window, Qt.Key_Space)          # …Space stars it
+                QTest.keyClick(window, Qt.Key_Right)          # arrow to b3
                 QTest.keyClick(window, Qt.Key_4)              # b3 junk
                 QTest.keyClick(window, Qt.Key_Return)         # save & next
                 self.assertTrue(window.title.text().startswith("Single photos"))
@@ -69,6 +73,35 @@ class LabelWindowTests(unittest.TestCase):
                              {r: e["label"] for r, e in store.labels.items()})
             self.assertTrue(all(e["sha256"] for e in store.labels.values()))
             self.assertEqual("b1.jpg", store.labels["b3.jpg"]["moment"])
+
+    def test_arrow_keys_move_the_selection_even_when_the_scroll_area_has_focus(self):
+        # Reported 2026-10-11: arrows did nothing — the scroll area had keyboard
+        # focus and used them to scroll.
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as local:
+            for i in range(6):
+                _shot(root, f"s{i}.jpg", f"2024:08:13 07:12:0{i}", (40 * i, 90, 90))
+            with patch.dict(os.environ, {"LOCALAPPDATA": local}):
+                window = RankingLabelWindow(root)
+                window.resize(1400, 900)
+                window.show()
+                window.activateWindow()
+                self.addCleanup(window.close)
+                self.assertTrue(self._wait(lambda: len(window.tiles) == 6))
+                self.assertEqual(Qt.NoFocus, window.scroll.focusPolicy())
+                for target in (window.scroll, window.scroll.viewport(), window):
+                    target.setFocus()
+                    self.app.processEvents()
+                    focused = QApplication.focusWidget() or window
+                    window.focus = 0
+                    QTest.keyClick(focused, Qt.Key_Right)
+                    self.assertEqual(1, window.focus, f"Right ignored with focus on {type(focused).__name__}")
+                    QTest.keyClick(focused, Qt.Key_Down)
+                    self.assertEqual(1 + window.cols if 1 + window.cols < 6 else 1, window.focus)
+                # a click selects without labelling
+                window._select("s3.jpg")
+                self.assertEqual(3, window.focus)
+                self.assertIsNone(window.current["s3.jpg"])
+                window.dirty = False
 
     def test_resume_starts_at_first_unlabelled_page(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as local:

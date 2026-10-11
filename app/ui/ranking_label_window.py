@@ -10,7 +10,7 @@ app/core/ranking_eval.py; this module is widgets only.
 import os
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QImage, QPixmap
+from PySide6.QtGui import QDesktopServices, QImage, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
@@ -31,14 +31,14 @@ LABEL_TEXT = {"best": "★ Best", "keep": "Keep", "redundant": "Redundant", "jun
 LABEL_COLOR = {"best": "#d97706", "keep": "#16a34a", "redundant": "#6b7280", "junk": "#dc2626"}
 KEY_LABEL = {Qt.Key_1: "best", Qt.Key_2: "keep", Qt.Key_3: "redundant", Qt.Key_4: "junk"}
 
-SERIES_HELP = ("<b>Pick the shot you would keep.</b> Click a photo to star it as ★ Best (you can star more "
-               "than one). Mark weaker near-copies <b>Redundant</b> and bad photos <b>Junk</b>; anything "
-               "unmarked counts as Keep. Keys: <b>1</b> best · <b>2</b> keep · <b>3</b> redundant · "
-               "<b>4</b> junk · arrows move · <b>Enter</b> save &amp; next · <b>S</b> skip · "
+SERIES_HELP = ("<b>Pick the shot you would keep.</b> Click a photo (or use the arrow keys) to select it, "
+               "then press <b>1</b> or <b>Space</b> to star it ★ Best — or use the buttons under each photo. "
+               "Mark weaker near-copies <b>Redundant</b> (<b>3</b>) and bad photos <b>Junk</b> (<b>4</b>); "
+               "anything unmarked counts as Keep (<b>2</b>). <b>Enter</b> save &amp; next · <b>S</b> skip · "
                "<b>Backspace</b> back · <b>O</b> or double-click opens full size.")
-SINGLES_HELP = ("<b>Mark the bad ones.</b> Click a photo to toggle <b>Junk</b> (blurry, dark, accidental, "
-                "useless). Anything unmarked counts as Keep. Press <b>1</b> on a photo you think is "
-                "genuinely great (★ Best). Same keys as before; <b>Enter</b> saves the page.")
+SINGLES_HELP = ("<b>Mark the bad ones.</b> Select a photo (click or arrow keys) and press <b>4</b> or "
+                "<b>Space</b> for <b>Junk</b> (blurry, dark, accidental, useless); <b>1</b> for one you think "
+                "is genuinely great (★ Best). Anything unmarked counts as Keep. <b>Enter</b> saves the page.")
 
 
 class _LoadSignals(QObject):
@@ -165,6 +165,9 @@ class RankingLabelWindow(QMainWindow):
         self.bar = QProgressBar()
         outer.addWidget(self.bar)
         self.scroll = QScrollArea()
+        # The scroll area must not take keyboard focus: it swallowed the arrow
+        # keys for scrolling, so the photo selection never moved.
+        self.scroll.setFocusPolicy(Qt.NoFocus)
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.grid_host = QWidget()
@@ -186,6 +189,7 @@ class RankingLabelWindow(QMainWindow):
         outer.addLayout(buttons)
         self.setCentralWidget(central)
         self.setFocusPolicy(Qt.StrongFocus)
+        self._bind_keys()
 
         self.worker = LabelIndexWorker(root)
         self.worker.progress.connect(self._on_index_progress)
@@ -244,7 +248,7 @@ class RankingLabelWindow(QMainWindow):
         self.tiles = []
         for i, rel in enumerate(rels):
             tile = _Tile(rel, edge,
-                         on_click=lambda r=rel: self._click(r),
+                         on_click=lambda r=rel: self._select(r),
                          on_open=lambda r=rel: self._open(r),
                          on_set=lambda lab, r=rel: self._set(r, lab))
             tile.set_label(self.current[rel])
@@ -308,7 +312,15 @@ class RankingLabelWindow(QMainWindow):
                 self.focus = i
         self._refocus()
 
-    def _click(self, rel: str):
+    def _select(self, rel: str):
+        """A click selects the photo; keys or its buttons then label it."""
+        for i, tile in enumerate(self.tiles):
+            if tile.rel == rel:
+                self.focus = i
+        self._refocus()
+
+    def _toggle(self, rel: str):
+        """Space: star/unstar in a burst, junk/unjunk on a singles page."""
         now = self.current.get(rel)
         if self._is_series_page():
             self._set(rel, "keep" if now == "best" else "best")
@@ -355,28 +367,30 @@ class RankingLabelWindow(QMainWindow):
         if self.page_idx > 0:
             self._show_page(self.page_idx - 1)
 
-    def keyPressEvent(self, event):
-        key = event.key()
-        if not self.tiles:
-            return super().keyPressEvent(event)
-        if key in KEY_LABEL:
-            self._set(self.tiles[self.focus].rel, KEY_LABEL[key])
-        elif key == Qt.Key_Space:
-            self._click(self.tiles[self.focus].rel)
-        elif key in (Qt.Key_Return, Qt.Key_Enter):
-            self._next()
-        elif key == Qt.Key_Backspace:
-            self._back()
-        elif key == Qt.Key_S:
-            self._skip()
-        elif key == Qt.Key_O:
-            self._open(self.tiles[self.focus].rel)
-        elif key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
-            step = {Qt.Key_Left: -1, Qt.Key_Right: 1, Qt.Key_Up: -self.cols, Qt.Key_Down: self.cols}[key]
-            self.focus = max(0, min(len(self.tiles) - 1, self.focus + step))
-            self._refocus()
-        else:
-            super().keyPressEvent(event)
+    def _bind_keys(self):
+        """Window-wide shortcuts: they work whatever child has focus (a key
+        handler on the window only saw keys nothing else had consumed)."""
+        def on(key, action):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(lambda: self.tiles and action())
+
+        for key, label in KEY_LABEL.items():
+            on(key, lambda lab=label: self._set(self.tiles[self.focus].rel, lab))
+        on(Qt.Key_Space, lambda: self._toggle(self.tiles[self.focus].rel))
+        on(Qt.Key_Return, self._next)
+        on(Qt.Key_Enter, self._next)
+        on(Qt.Key_Backspace, self._back)
+        on(Qt.Key_S, self._skip)
+        on(Qt.Key_O, lambda: self._open(self.tiles[self.focus].rel))
+        on(Qt.Key_Left, lambda: self._move(-1))
+        on(Qt.Key_Right, lambda: self._move(1))
+        on(Qt.Key_Up, lambda: self._move(-self.cols))
+        on(Qt.Key_Down, lambda: self._move(self.cols))
+
+    def _move(self, step: int):
+        self.focus = max(0, min(len(self.tiles) - 1, self.focus + step))
+        self._refocus()
 
     def closeEvent(self, event):
         if self.dirty and self.pages:
